@@ -125,18 +125,20 @@ class Elm327(
      * where 20 bytes per notification is common.
      */
     private fun onChunk(chunk: String) {
-        val complete: String?
+        // Assigned inside the lock, consumed outside it: completing the deferred while
+        // holding the buffer lock would let the resumed coroutine re-enter onChunk.
+        var complete: String? = null
         synchronized(buffer) {
             buffer.append(chunk)
             val promptIndex = buffer.indexOf(">")
-            if (promptIndex < 0) return
-            complete = buffer.substring(0, promptIndex)
-            buffer.delete(0, promptIndex + 1)
+            if (promptIndex >= 0) {
+                complete = buffer.substring(0, promptIndex)
+                buffer.delete(0, promptIndex + 1)
+            }
         }
-        complete?.let { text ->
-            _wire.tryEmit(WireLine(outgoing = false, text = text.trim()))
-            pending?.complete(text)
-        }
+        val text = complete ?: return
+        _wire.tryEmit(WireLine(outgoing = false, text = text.trim()))
+        pending?.complete(text)
     }
 
     /**

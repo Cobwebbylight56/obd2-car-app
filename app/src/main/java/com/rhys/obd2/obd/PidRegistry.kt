@@ -20,6 +20,14 @@ object PidRegistry {
     private fun IntArray.c() = this[2]
     private fun IntArray.d() = this[3]
 
+    /**
+     * Explicitly typed builder for multi-value decoders. Deliberately not `buildList`:
+     * its builder inference has to run inside the PID table's own builder, and nested
+     * inference is fragile enough that pinning the type here is worth the extra helper.
+     */
+    private inline fun readings(block: MutableList<Reading>.() -> Unit): List<Reading> =
+        mutableListOf<Reading>().apply(block)
+
     private fun one(value: Double, label: String = "", unit: String = "", text: String? = null) =
         listOf(Reading(label, value, unit, text))
 
@@ -35,7 +43,7 @@ object PidRegistry {
     /** Temperature encoding: unsigned byte offset by 40 °C. */
     private fun temp(v: Int) = v - 40.0
 
-    val ALL: List<Pid> = buildList {
+    val ALL: List<Pid> = ArrayList<Pid>().apply {
 
         // --- Status and support bitmaps -------------------------------------------------
         add(Pid(0x00, "Supported PIDs 01-20", bytes = 4, category = PidCategory.STATUS) {
@@ -204,13 +212,13 @@ object PidRegistry {
             one(it.a() * 10.0)
         })
         add(Pid(0x66, "Mass air flow sensor", "g/s", 0.0, 2047.97, 5, PidCategory.AIR) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Sensor A", it.word(1) / 32.0, "g/s"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Sensor B", it.word(3) / 32.0, "g/s"))
             }
         })
         add(Pid(0x87, "Intake manifold absolute pressure (extended)", "kPa", 0.0, 8031.0, 5, PidCategory.AIR) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Sensor A", it.word(1) / 32.0, "kPa"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Sensor B", it.word(3) / 32.0, "kPa"))
             }
@@ -224,13 +232,13 @@ object PidRegistry {
             one(temp(it.a()))
         })
         add(Pid(0x67, "Engine coolant temperature (sensors)", "°C", -40.0, 215.0, 3, PidCategory.TEMPERATURE) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Sensor 1", temp(it[1]), "°C"))
                 if (it[0] and 0x02 != 0 && it.size >= 3) add(Reading("Sensor 2", temp(it[2]), "°C"))
             }
         })
         add(Pid(0x68, "Intake air temperature (sensors)", "°C", -40.0, 215.0, 3, PidCategory.TEMPERATURE) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Bank 1 Sensor 1", temp(it[1]), "°C"))
                 if (it[0] and 0x02 != 0 && it.size >= 3) add(Reading("Bank 1 Sensor 2", temp(it[2]), "°C"))
             }
@@ -248,7 +256,7 @@ object PidRegistry {
             one(it.word() / 10.0 - 40.0)
         })
         add(Pid(0x77, "Charge air cooler temperature", "°C", -40.0, 6513.5, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Bank 1 Sensor 1", it.word(1) / 10.0 - 40.0, "°C"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Bank 1 Sensor 2", it.word(3) / 10.0 - 40.0, "°C"))
             }
@@ -326,7 +334,7 @@ object PidRegistry {
             one(it.a().toDouble(), text = "Design type 0x%02X".format(it.a()))
         })
         add(Pid(0x83, "NOx sensor", "ppm", 0.0, 65535.0, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Sensor 1", it.word(1).toDouble(), "ppm"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Sensor 2", it.word(3).toDouble(), "ppm"))
             }
@@ -345,7 +353,7 @@ object PidRegistry {
                     "V", 0.0, 1.275, 2, PidCategory.OXYGEN,
                     featured = sensor == 0,
                 ) { data ->
-                    buildList {
+                    readings {
                         add(Reading("Voltage", data.a() / 200.0, "V"))
                         // 0xFF in byte B is the standard's "trim not used with this sensor".
                         if (data.b() != 0xFF) add(Reading("Short term trim", trim(data.b()), "%"))
@@ -382,19 +390,19 @@ object PidRegistry {
 
         // --- Diesel, turbo and aftertreatment -------------------------------------------
         add(Pid(0x6B, "EGR temperature", "°C", -40.0, 215.0, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Bank 1", temp(it[1]), "°C"))
                 if (it[0] and 0x02 != 0 && it.size >= 3) add(Reading("Bank 2", temp(it[2]), "°C"))
             }
         })
         add(Pid(0x6F, "Turbocharger compressor inlet pressure", "kPa", 0.0, 255.0, 3, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0) add(Reading("Sensor A", it[1].toDouble(), "kPa"))
                 if (it[0] and 0x02 != 0 && it.size >= 3) add(Reading("Sensor B", it[2].toDouble(), "kPa"))
             }
         })
         add(Pid(0x70, "Boost pressure control", "kPa", 0.0, 2047.97, 9, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it.size >= 5) {
                     add(Reading("Commanded boost A", it.word(1) / 32.0, "kPa"))
                     add(Reading("Actual boost A", it.word(3) / 32.0, "kPa"))
@@ -402,7 +410,7 @@ object PidRegistry {
             }
         })
         add(Pid(0x71, "Variable geometry turbo control", "%", 0.0, 100.0, 6, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it.size >= 3) {
                     add(Reading("Commanded A", pct255(it[1]), "%"))
                     add(Reading("Actual A", pct255(it[2]), "%"))
@@ -410,7 +418,7 @@ object PidRegistry {
             }
         })
         add(Pid(0x72, "Wastegate control", "%", 0.0, 100.0, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it.size >= 5) {
                     add(Reading("Commanded A", it.word(1) / 32.0, "%"))
                     add(Reading("Actual A", it.word(3) / 32.0, "%"))
@@ -418,19 +426,19 @@ object PidRegistry {
             }
         })
         add(Pid(0x73, "Exhaust pressure", "kPa", 0.0, 2047.97, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0 && it.size >= 3) add(Reading("Sensor 1", it.word(1) / 128.0, "kPa"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Sensor 2", it.word(3) / 128.0, "kPa"))
             }
         })
         add(Pid(0x74, "Turbocharger RPM", "rpm", 0.0, 655350.0, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0 && it.size >= 3) add(Reading("Turbo A", it.word(1) * 10.0, "rpm"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Turbo B", it.word(3) * 10.0, "rpm"))
             }
         })
         add(Pid(0x7C, "Diesel particulate filter temperature", "°C", -40.0, 6513.5, 9, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it.size >= 5) {
                     add(Reading("Inlet", it.word(1) / 10.0 - 40.0, "°C"))
                     add(Reading("Outlet", it.word(3) / 10.0 - 40.0, "°C"))
@@ -439,14 +447,14 @@ object PidRegistry {
             }
         })
         add(Pid(0x7F, "Engine run time (extended)", "s", 0.0, 4294967295.0, 13, PidCategory.ENGINE) {
-            buildList {
+            readings {
                 if (it.size >= 5) add(Reading("Total run time", dword(it, 1), "s"))
                 if (it.size >= 9) add(Reading("Idle run time", dword(it, 5), "s"))
                 if (it.size >= 13) add(Reading("PTO run time", dword(it, 9), "s"))
             }
         })
         add(Pid(0x86, "Particulate matter sensor", "mg/m³", 0.0, 8191.75, 5, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0 && it.size >= 3) add(Reading("Bank 1", it.word(1) / 8.0, "mg/m³"))
                 if (it[0] and 0x02 != 0 && it.size >= 5) add(Reading("Bank 2", it.word(3) / 8.0, "mg/m³"))
             }
@@ -457,12 +465,12 @@ object PidRegistry {
             one(pct255(it.a()))
         })
         add(Pid(0xA4, "Transmission actual gear", "", 0.0, 65.535, 4, PidCategory.OTHER) {
-            buildList {
+            readings {
                 if (it[0] and 0x01 != 0 && it.size >= 4) add(Reading("Gear ratio", it.word(2) / 1000.0, ""))
             }
         })
         add(Pid(0xA5, "Diesel exhaust fluid sensor", "%", 0.0, 100.0, 4, PidCategory.DIESEL) {
-            buildList {
+            readings {
                 if (it.size >= 4) {
                     add(Reading("DEF concentration", it[1] / 2.0, "%"))
                     add(Reading("DEF tank level", pct255(it[2]), "%"))
@@ -505,7 +513,7 @@ object PidRegistry {
         ((d[offset].toLong() shl 24) or (d[offset + 1].toLong() shl 16) or
             (d[offset + 2].toLong() shl 8) or d[offset + 3].toLong()).toDouble()
 
-    private fun egt(d: IntArray, bank: String): List<Reading> = buildList {
+    private fun egt(d: IntArray, bank: String): List<Reading> = readings {
         // Low nibble of byte A is a per-sensor support mask for the four sensors following.
         for (sensor in 0 until 4) {
             val offset = 1 + sensor * 2
