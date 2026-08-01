@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState
@@ -130,6 +131,35 @@ class ObdRepository(
 
     private val _busy = MutableStateFlow<String?>(null)
     val busy: StateFlow<String?> = _busy.asStateFlow()
+
+    /**
+     * Non-zero while a one-off read (fault codes, freeze frame, service 06) is running.
+     *
+     * Without this, a foreground read merely competes with the dashboard's polling loop
+     * for [adapterLock] and ends up interleaved one-for-one with it. The mutex keeps that
+     * correct but not fast: a freeze frame is twenty requests, so interleaving doubles it
+     * to forty round trips, and on a BLE adapter managing five a second that is the
+     * difference between four seconds and eight. Pausing the loop for the duration costs
+     * a moment of stale gauges and halves the wait.
+     *
+     * Counted rather than boolean because these operations nest — clearing codes re-reads
+     * them afterwards — and a plain flag would be cleared by the inner call while the
+     * outer one was still going.
+     */
+    private val exclusiveDepth = AtomicInteger(0)
+
+    /**
+     * Runs [block] with the polling loop held off, publishing [label] as the busy state.
+     */
+    private suspend fun <T> exclusive(label: String, block: suspend () -> T): T {
+        exclusiveDepth.incrementAndGet()
+        _busy.value = label
+        try {
+            return block()
+        } finally {
+            if (exclusiveDepth.decrementAndGet() == 0) _busy.value = null
+        }
+    }
 
     val tripLogger = TripLogger(context)
 
@@ -249,10 +279,9 @@ class ObdRepository(
      */
     suspend fun discoverSupportedPids() {
         val session = elm ?: return
-        _busy.value = "Checking what this car supports"
         val supported = mutableSetOf<Int>()
 
-        try {
+        exclusive("Checking what this car supports") {
             for (base in PidRegistry.SUPPORT_PIDS) {
                 val result = adapterLock.withLock { session.obd(0x01, base, expectedResponses = 1) }
                 if (!result.isSuccess || result.data.size < 4) break
@@ -262,8 +291,6 @@ class ObdRepository(
                 val hasNext = result.data[3] and 0x01 != 0
                 if (!hasNext) break
             }
-        } finally {
-            _busy.value = null
         }
 
         supported += PidRegistry.SUPPORT_PIDS.first()
@@ -305,6 +332,12 @@ class ObdRepository(
                 val session = elm
                 if (session == null || transport?.isConnected != true) {
                     delay(500)
+                    continue
+                }
+
+                if (exclusiveDepth.get() > 0) {
+                    // A foreground read owns the adapter for now.
+                    delay(POLL_YIELD_MS)
                     continue
                 }
 
@@ -392,8 +425,7 @@ class ObdRepository(
 
     suspend fun refreshDtcs(): DtcSnapshot? {
         val session = elm ?: return null
-        _busy.value = "Reading fault codes"
-        try {
+        return exclusive("Reading fault codes") {
             // Services 03, 07 and 0A are three different lists, and a car can have codes
             // in one but not the others. Reading only 03 is why some scanners miss faults.
             val stored = readDtcList(session, 0x03, DtcStatus.STORED)
@@ -411,9 +443,7 @@ class ObdRepository(
                 milOn = readinessData?.milOn ?: stored.isNotEmpty(),
             )
             _dtcs.value = snapshot
-            return snapshot
-        } finally {
-            _busy.value = null
+            return@exclusive snapshot
         }
     }
 
@@ -437,13 +467,12 @@ class ObdRepository(
      */
     suspend fun clearDtcs(): ClearResult {
         val session = elm ?: return ClearResult(false, "Not connected to the car")
-        _busy.value = "Clearing codes"
-        try {
+        return exclusive("Clearing codes") {
             val result = adapterLock.withLock {
                 session.obd(0x04, null, timeoutMs = Elm327.SLOW_TIMEOUT_MS)
             }
             if (!result.isSuccess && result.error != ObdError.NO_DATA) {
-                return ClearResult(false, "The car refused the clear request (${result.error}). Try again with the engine off and the ignition on.")
+                return@exclusive ClearResult(false, "The car refused the clear request (${result.error}). Try again with the engine off and the ignition on.")
             }
 
             _freezeFrame.value = null
@@ -453,7 +482,7 @@ class ObdRepository(
             refreshReadiness()
 
             val remaining = after?.stored?.size ?: 0
-            return if (remaining == 0) {
+            return@exclusive if (remaining == 0) {
                 ClearResult(
                     true,
                     "Codes cleared. Readiness monitors have reset — the car needs a normal drive cycle " +
@@ -466,8 +495,6 @@ class ObdRepository(
                         "fault is still present rather than a leftover from an earlier repair.",
                 )
             }
-        } finally {
-            _busy.value = null
         }
     }
 
@@ -479,15 +506,12 @@ class ObdRepository(
 
     suspend fun refreshReadiness(): Readiness? {
         val session = elm ?: return null
-        _busy.value = "Reading emissions monitors"
-        try {
+        return exclusive("Reading emissions monitors") {
             val result = adapterLock.withLock { session.obd(0x01, 0x01, expectedResponses = 1) }
             if (!result.isSuccess) return null
             val readiness = Readiness.decode(result.data)
             _readiness.value = readiness
-            return readiness
-        } finally {
-            _busy.value = null
+            return@exclusive readiness
         }
     }
 
@@ -500,8 +524,7 @@ class ObdRepository(
      */
     suspend fun refreshFreezeFrame(): FreezeFrame? {
         val session = elm ?: return null
-        _busy.value = "Reading freeze frame"
-        try {
+        return exclusive("Reading freeze frame") {
             val trigger = adapterLock.withLock { session.obd(0x02, 0x02, expectedResponses = 1) }
             val triggerCode = if (trigger.isSuccess && trigger.data.size >= 3) {
                 // Byte 0 is the frame number; the code itself is the two after it.
@@ -535,21 +558,18 @@ class ObdRepository(
 
             if (triggerCode == null && captured.isEmpty()) {
                 _freezeFrame.value = null
-                return null
+                return@exclusive null
             }
 
             val frame = FreezeFrame(triggerCode, captured)
             _freezeFrame.value = frame
-            return frame
-        } finally {
-            _busy.value = null
+            return@exclusive frame
         }
     }
 
     suspend fun refreshMonitorTests(): List<MonitorTest> {
         val session = elm ?: return emptyList()
-        _busy.value = "Reading on-board test results"
-        try {
+        return exclusive("Reading on-board test results") {
             val collected = mutableListOf<MonitorTest>()
 
             // Ask which monitor IDs exist, then read each. Requesting 0x00 returns a
@@ -575,9 +595,7 @@ class ObdRepository(
             }
 
             _monitorTests.value = collected
-            return collected
-        } finally {
-            _busy.value = null
+            return@exclusive collected
         }
     }
 
@@ -587,8 +605,7 @@ class ObdRepository(
 
     suspend fun refreshVehicleInfo(): VehicleInfo? {
         val session = elm ?: return null
-        _busy.value = "Reading vehicle information"
-        try {
+        return exclusive("Reading vehicle information") {
             val vin = adapterLock.withLock {
                 session.obd(0x09, Mode09.PID_VIN, timeoutMs = Elm327.SLOW_TIMEOUT_MS)
             }.let { if (it.isSuccess) Mode09.parseVin(it.data) else null }
@@ -629,9 +646,7 @@ class ObdRepository(
                 supportedPids = _supportedPids.value,
             )
             _vehicleInfo.value = info
-            return info
-        } finally {
-            _busy.value = null
+            return@exclusive info
         }
     }
 
@@ -662,6 +677,7 @@ class ObdRepository(
         private const val TAG = "ObdRepository"
         private const val HISTORY_POINTS = 120
         private const val MAX_PID_FAILURES = 3
+        private const val POLL_YIELD_MS = 50L
         private const val MAX_MONITOR_IDS = 24
 
         /**

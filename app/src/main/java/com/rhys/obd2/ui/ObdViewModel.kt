@@ -95,6 +95,20 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Connects to the previously used adapter, at most once per app session.
+     *
+     * Guarded rather than driven purely off connection state, so that deliberately
+     * disconnecting doesn't immediately reconnect underneath the user.
+     */
+    fun autoConnectOnce() {
+        if (autoConnectAttempted) return
+        autoConnectAttempted = true
+        connectToLastDevice()
+    }
+
+    private var autoConnectAttempted = false
+
     fun connectToLastDevice() {
         val saved = settings.lastDevice ?: return
         connect(AdapterDevice(saved.name, saved.address, saved.kind))

@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,7 @@ import com.rhys.obd2.ui.theme.Info
 @Composable
 fun ConnectScreen(
     viewModel: ObdViewModel,
+    permissionsGranted: Boolean,
     onRequestPermissions: () -> Unit,
     onConnected: () -> Unit,
 ) {
@@ -65,10 +67,24 @@ fun ConnectScreen(
     val scanning by viewModel.scanning.collectAsState()
     var showWifiDialog by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) {
-        onRequestPermissions()
-        viewModel.startScan()
+    val autoConnect by viewModel.settings.autoConnect.collectAsState()
+
+    // Ask on first appearance; the scan itself waits for the answer.
+    LaunchedEffect(Unit) { onRequestPermissions() }
+
+    DisposableEffect(permissionsGranted) {
+        if (permissionsGranted) viewModel.startScan()
         onDispose { viewModel.stopScan() }
+    }
+
+    // Reconnect to the adapter used last time, once, if the user has asked for that.
+    // Worth doing automatically: the usual sequence is plug in, start engine, open app,
+    // and there is nothing useful to choose between on a phone that only ever sees one
+    // dongle.
+    LaunchedEffect(permissionsGranted, connection) {
+        if (autoConnect && permissionsGranted && connection is ConnectionState.Disconnected) {
+            viewModel.autoConnectOnce()
+        }
     }
 
     LazyColumn(
@@ -127,7 +143,15 @@ fun ConnectScreen(
                     }
                 },
             ) {
-                if (devices.isEmpty()) {
+                if (!permissionsGranted) {
+                    Text(
+                        "OpenOBD needs Bluetooth permission to find adapters. Grant it when " +
+                            "Android asks, or from the app's page in Android settings if you " +
+                            "already dismissed the prompt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (devices.isEmpty()) {
                     Text(
                         if (scanning) {
                             "Looking for Bluetooth adapters. Make sure the dongle is plugged into the " +

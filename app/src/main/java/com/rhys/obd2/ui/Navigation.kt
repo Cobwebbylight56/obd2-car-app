@@ -63,6 +63,9 @@ private data class Destination(
     val icon: ImageVector,
 )
 
+/** Routes that display continuously updating values and therefore want the poll loop. */
+private val LIVE_ROUTES = setOf(Routes.DASHBOARD, Routes.LIVE)
+
 private val BOTTOM_BAR = listOf(
     Destination(Routes.DASHBOARD, "Dash", Icons.Filled.Dashboard),
     Destination(Routes.LIVE, "Live", Icons.Filled.BarChart),
@@ -73,6 +76,7 @@ private val BOTTOM_BAR = listOf(
 
 @Composable
 fun OpenObdApp(
+    permissionsGranted: Boolean,
     onRequestPermissions: () -> Unit,
     viewModel: ObdViewModel = viewModel(),
 ) {
@@ -104,6 +108,14 @@ fun OpenObdApp(
     val currentRoute = backStack?.destination?.route
     val showBottomBar = currentRoute in BOTTOM_BAR.map { it.route }
 
+    // Only two screens show live values. Everywhere else, polling would compete with
+    // whatever that screen is actually trying to read, so it is stopped centrally here
+    // rather than in each screen's own disposal — which would otherwise race with the
+    // incoming screen starting it again.
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute !in LIVE_ROUTES) viewModel.stopPolling()
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHost) },
@@ -130,6 +142,7 @@ fun OpenObdApp(
                 composable(Routes.CONNECT) {
                     ConnectScreen(
                         viewModel = viewModel,
+                        permissionsGranted = permissionsGranted,
                         onRequestPermissions = onRequestPermissions,
                         onConnected = { navigateTop(navController, Routes.DASHBOARD) },
                     )

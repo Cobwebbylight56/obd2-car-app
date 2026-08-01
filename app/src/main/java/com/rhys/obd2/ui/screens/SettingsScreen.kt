@@ -95,7 +95,8 @@ fun SettingsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                     ) { viewModel.settings.setKeepScreenOn(it) }
                     ToggleRow(
                         "Reconnect to last adapter",
-                        "Offers the previously used adapter as soon as the connect screen opens.",
+                        "Connects to the adapter you used last as soon as the app opens, so you " +
+                            "don't have to pick it every time. Disconnecting by hand won't trigger it.",
                         autoConnect,
                     ) { viewModel.settings.setAutoConnect(it) }
                 }
