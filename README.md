@@ -1,5 +1,7 @@
 # OpenOBD
 
+[![Build APK](https://github.com/Cobwebbylight56/obd2-car-app/actions/workflows/build.yml/badge.svg)](https://github.com/Cobwebbylight56/obd2-car-app/actions/workflows/build.yml)
+
 An Android OBD-II scanner. Plugs into any ELM327-compatible adapter and gives you live
 engine data, fault codes with plain-English explanations, emissions readiness, freeze
 frame, on-board test results and trip logging.
@@ -12,7 +14,7 @@ Built because the scanner app I was using stopped being supported.
 
 You don't need Android Studio. Every push to this repository builds a working APK.
 
-1. Go to the **Actions** tab of this repository.
+1. Go to the [**Actions** tab](https://github.com/Cobwebbylight56/obd2-car-app/actions/workflows/build.yml).
 2. Click the most recent green **Build APK** run.
 3. Scroll to **Artifacts** and download `OpenOBD-debug-apk`.
 4. Unzip it, copy `app-debug.apk` to your phone, and open it.
