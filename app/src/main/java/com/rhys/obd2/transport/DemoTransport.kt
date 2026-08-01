@@ -10,7 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -36,7 +36,7 @@ class DemoTransport : ObdTransport {
         extraBufferCapacity = 256,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    override val incoming: Flow<String> = _incoming.asSharedFlow()
+    override val incoming: SharedFlow<String> = _incoming.asSharedFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 

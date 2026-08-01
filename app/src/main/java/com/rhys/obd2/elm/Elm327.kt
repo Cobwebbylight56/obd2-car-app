@@ -11,6 +11,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -104,11 +105,25 @@ class Elm327(
     /** True once headers are enabled, so parsers know to expect a leading CAN ID. */
     private var headersOn = false
 
-    fun start() {
+    /**
+     * Begins consuming the transport, and does not return until the subscription is
+     * actually registered.
+     *
+     * The wait matters. [ObdTransport.incoming] is hot with no replay, so anything the
+     * adapter says between the write and the collector attaching is dropped on the floor.
+     * Launching the collector and immediately writing a command is a race that a slow
+     * Bluetooth link hides and a fast Wi-Fi or loopback link loses: the response arrives
+     * before anyone is listening, and the command times out for no visible reason.
+     */
+    suspend fun start() {
         collectorJob?.cancel()
+        val subscribed = CompletableDeferred<Unit>()
         collectorJob = scope.launch {
-            transport.incoming.collect { chunk -> onChunk(chunk) }
+            transport.incoming
+                .onSubscription { subscribed.complete(Unit) }
+                .collect { chunk -> onChunk(chunk) }
         }
+        subscribed.await()
     }
 
     fun stop() {

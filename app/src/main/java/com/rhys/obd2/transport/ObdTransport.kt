@@ -1,6 +1,6 @@
 package com.rhys.obd2.transport
 
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 
 /**
  * How the app is physically wired to the ELM327 chip in the dongle.
@@ -23,8 +23,12 @@ interface ObdTransport {
      * Incoming bytes as they arrive, already decoded to ASCII. Chunk boundaries are
      * arbitrary and meaningless — BLE in particular will split a response across many
      * 20-byte notifications. The framing into commands/responses happens upstream.
+     *
+     * Typed as a SharedFlow rather than a plain Flow on purpose: it is hot and has no
+     * replay, so a consumer has to be able to wait until its subscription is actually
+     * registered before provoking a response. See [com.rhys.obd2.elm.Elm327.start].
      */
-    val incoming: Flow<String>
+    val incoming: SharedFlow<String>
 
     /** Opens the link. Throws [ObdConnectionException] if it can't. */
     suspend fun connect()

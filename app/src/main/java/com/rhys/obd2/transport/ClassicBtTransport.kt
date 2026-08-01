@@ -16,7 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
@@ -47,7 +47,7 @@ class ClassicBtTransport(
         extraBufferCapacity = 256,
         onBufferOverflow = BufferOverflow.SUSPEND,
     )
-    override val incoming: Flow<String> = _incoming.asSharedFlow()
+    override val incoming: SharedFlow<String> = _incoming.asSharedFlow()
 
     private var socket: BluetoothSocket? = null
     private var input: InputStream? = null
