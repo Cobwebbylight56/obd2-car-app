@@ -28,11 +28,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Compile first and on its own. A Kotlin compile error otherwise ends up buried
+      # under a few hundred lines of Gradle's own stack trace, which makes the actual
+      # "e: file:... " lines nearly impossible to find in the web log viewer.
+      - name: Compile
+        run: ./gradlew compileDebugKotlin compileDebugUnitTestKotlin
+
       - name: Run unit tests
-        run: ./gradlew test --stacktrace
+        run: ./gradlew test
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
