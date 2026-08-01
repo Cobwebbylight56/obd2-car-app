@@ -17,7 +17,17 @@ class DtcTest {
         assertEquals("P0301", Dtc.decodePair(0x03, 0x01))
         assertEquals("C0035", Dtc.decodePair(0x40, 0x35))
         assertEquals("B0001", Dtc.decodePair(0x80, 0x01))
-        assertEquals("U0100", Dtc.decodePair(0xC0, 0x01))
+        assertEquals("U0001", Dtc.decodePair(0xC0, 0x01))
+    }
+
+    @Test
+    fun `the low nibble of the first byte is the high digit of the remainder`() {
+        // Easy to get backwards: U0100 is 0xC1 0x00, not 0xC0 0x01. Getting it wrong
+        // silently renames every code in the second half of a manufacturer's range.
+        assertEquals("U0100", Dtc.decodePair(0xC1, 0x00))
+        assertEquals("P0420", Dtc.decodePair(0x04, 0x20))
+        assertEquals("P0171", Dtc.decodePair(0x01, 0x71))
+        assertEquals("C1234", Dtc.decodePair(0x52, 0x34))
     }
 
     @Test
