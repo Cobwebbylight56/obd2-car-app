@@ -14,8 +14,9 @@ import org.junit.Test
  */
 class PidDecodingTest {
 
+    // `vararg bytes: Int` is already an IntArray, which is what decodeSingle wants.
     private fun decode(pid: Int, vararg bytes: Int): Double? =
-        PidRegistry[pid]?.decodeSingle(bytes.toIntArray())
+        PidRegistry[pid]?.decodeSingle(bytes)
 
     @Test
     fun `engine RPM is a quarter of the 16-bit value`() {
