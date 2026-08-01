@@ -13,3 +13,5 @@ app/build/
 *.aab
 *.keystore
 !gradle/wrapper/gradle-wrapper.jar
+compile.log
+test.log

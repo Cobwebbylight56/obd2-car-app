@@ -28,14 +28,31 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Compile first and on its own. A Kotlin compile error otherwise ends up buried
-      # under a few hundred lines of Gradle's own stack trace, which makes the actual
-      # "e: file:... " lines nearly impossible to find in the web log viewer.
+      # Compile first and on its own, then re-print just the compiler diagnostics at the
+      # very end. Gradle interleaves them with task output and follows them with its own
+      # epilogue, so on a failure the "e: file:..." lines are neither first nor last and
+      # are genuinely hard to find in the web log viewer.
       - name: Compile
-        run: ./gradlew compileDebugKotlin compileDebugUnitTestKotlin
+        run: |
+          set -o pipefail
+          if ! ./gradlew compileDebugKotlin compileDebugUnitTestKotlin 2>&1 | tee compile.log; then
+            echo ""
+            echo "=================== COMPILER DIAGNOSTICS ==================="
+            grep -E '^(e|w): ' compile.log | grep -v 'daemon has terminated' || echo "(none found — see full log above)"
+            echo "============================================================"
+            exit 1
+          fi
 
       - name: Run unit tests
-        run: ./gradlew test
+        run: |
+          set -o pipefail
+          if ! ./gradlew test 2>&1 | tee test.log; then
+            echo ""
+            echo "===================== FAILING TESTS ========================"
+            grep -E 'FAILED|expected:|actual:|AssertionError|Exception' test.log | head -60
+            echo "============================================================"
+            exit 1
+          fi
 
       - name: Build debug APK
         run: ./gradlew assembleDebug
