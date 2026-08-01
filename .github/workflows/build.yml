@@ -64,14 +64,6 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-report
-          path: app/build/reports/tests/testDebugUnitTest
-          if-no-files-found: ignore
-
       # Tagging a commit v1.0.0 (or similar) publishes the APK as a GitHub Release,
       # which gives a stable download link rather than a 90-day artifact.
       - name: Publish release
