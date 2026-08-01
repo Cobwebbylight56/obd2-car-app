@@ -508,7 +508,7 @@ class ObdRepository(
         val session = elm ?: return null
         return exclusive("Reading emissions monitors") {
             val result = adapterLock.withLock { session.obd(0x01, 0x01, expectedResponses = 1) }
-            if (!result.isSuccess) return null
+            if (!result.isSuccess) return@exclusive null
             val readiness = Readiness.decode(result.data)
             _readiness.value = readiness
             return@exclusive readiness
