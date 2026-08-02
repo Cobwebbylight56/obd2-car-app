@@ -1,5 +1,6 @@
 package com.rhys.obd2.ui.screens
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,9 +34,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,7 +58,9 @@ import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Accent
 import com.rhys.obd2.ui.theme.Danger
 import com.rhys.obd2.ui.theme.Info
+import androidx.core.content.FileProvider
 import com.rhys.obd2.ui.theme.Warning
+import kotlinx.coroutines.launch
 
 @Composable
 fun DtcScreen(viewModel: ObdViewModel) {
@@ -65,6 +71,8 @@ fun DtcScreen(viewModel: ObdViewModel) {
     val units by viewModel.settings.units.collectAsState()
 
     var confirmClear by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LazyColumn(
         modifier = Modifier
@@ -120,6 +128,19 @@ fun DtcScreen(viewModel: ObdViewModel) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Read codes")
+                }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            viewModel.saveReport()?.let { shareReport(context, it) }
+                        }
+                    },
+                    enabled = busy == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Report")
                 }
                 OutlinedButton(
                     onClick = { confirmClear = true },
@@ -320,7 +341,9 @@ private fun ClearDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                     color = Warning,
                 )
                 Text(
-                    "Write the codes down first — you're about to delete the only record of them.",
+                    "This is the only record of these codes. Tap Cancel and then Report to save " +
+                        "the codes, freeze frame and readiness state to a file you can keep or send " +
+                        "to a garage.",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                 )
@@ -342,4 +365,23 @@ private fun severityColour(severity: DtcSeverity) = when (severity) {
     DtcSeverity.MODERATE -> Warning
     DtcSeverity.MINOR -> Info
     DtcSeverity.UNKNOWN -> Info
+}
+
+/**
+ * Hands the saved report to whatever the user wants to send it with.
+ *
+ * Plain text rather than an attachment-only type so that mail clients and messengers
+ * offer to inline it — a mechanic is far more likely to read a pasted report than to
+ * open an attachment from a stranger's phone.
+ */
+private fun shareReport(context: android.content.Context, file: java.io.File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, "Vehicle diagnostic report")
+        putExtra(Intent.EXTRA_TEXT, runCatching { file.readText() }.getOrDefault(""))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "Share diagnostic report"))
 }

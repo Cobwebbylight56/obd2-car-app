@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rhys.obd2.Obd2App
 import com.rhys.obd2.data.ConnectionState
+import com.rhys.obd2.data.DiagnosticReport
 import com.rhys.obd2.data.ObdForegroundService
 import com.rhys.obd2.data.ObdRepository
 import com.rhys.obd2.obd.PidRegistry
@@ -184,6 +185,33 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         ObdForegroundService.stop(getApplication())
         if (file != null) _message.value = "Saved ${file.name}"
         return file
+    }
+
+    /**
+     * Captures everything currently known about the car as a shareable text file.
+     *
+     * Reads whatever hasn't been read yet first, so the report is complete even if the
+     * user goes straight to it — there is no point producing a document that says
+     * "not read" for the sections they most wanted.
+     */
+    suspend fun saveReport(): File? {
+        if (repository.isConnected) {
+            if (dtcs.value == null) repository.refreshDtcs()
+            if (freezeFrame.value == null) repository.refreshFreezeFrame()
+            if (readiness.value == null) repository.refreshReadiness()
+            if (vehicleInfo.value?.vin == null) repository.refreshVehicleInfo()
+        }
+        val text = DiagnosticReport.build(
+            vehicle = vehicleInfo.value,
+            dtcs = dtcs.value,
+            readiness = readiness.value,
+            freezeFrame = freezeFrame.value,
+            monitorTests = monitorTests.value,
+            units = settings.units.value,
+        )
+        return runCatching { DiagnosticReport.save(getApplication(), text) }
+            .onFailure { _message.value = "Couldn't save the report: ${it.message}" }
+            .getOrNull()
     }
 
     fun listLogs(): List<File> = repository.tripLogger.listLogs()

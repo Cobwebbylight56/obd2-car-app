@@ -125,6 +125,13 @@ fuel economy estimate. Runs as a foreground service so the log doesn't get trunc
 the screen sleeps. Useful for chasing intermittent faults that never happen while you're
 looking at the phone.
 
+### Diagnostic report
+One button on the fault codes screen captures the codes, freeze frame, readiness state
+and vehicle identity into a plain-text file you can keep or send to a garage. It exists
+because clearing codes destroys the only record of them — "write them down first" is the
+standard advice and nobody does it. Plain text on purpose: it pastes into an email or a
+message without the recipient needing this app.
+
 ### Terminal
 Raw AT and OBD command console for when you want to check something the app doesn't
 expose, or work out why a particular adapter is misbehaving.
