@@ -132,6 +132,14 @@ because clearing codes destroys the only record of them — "write them down fir
 standard advice and nobody does it. Plain text on purpose: it pastes into an email or a
 message without the recipient needing this app.
 
+### Offline code lookup
+Search the built-in code database with no adapter and no car — for when a garage quotes
+you a code over the phone. Searches by number (`P0420`, or `P03` for the whole misfire
+family) or by description, since people usually remember "something about the catalytic
+converter" rather than the number. A well-formed code that isn't in the database still
+gets an answer from its structure: which system it belongs to, and whether it's
+manufacturer-defined and therefore unknowable generically.
+
 ### Terminal
 Raw AT and OBD command console for when you want to check something the app doesn't
 expose, or work out why a particular adapter is misbehaving.

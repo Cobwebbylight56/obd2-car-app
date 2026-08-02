@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
@@ -131,6 +132,11 @@ fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
                         "Terminal",
                         "Send raw AT and OBD commands to the adapter",
                     ) { onNavigate(Routes.TERMINAL) }
+                    MenuRow(
+                        Icons.Filled.Search,
+                        "Look up a code",
+                        "Search the offline code database — no car or adapter needed",
+                    ) { onNavigate(Routes.LOOKUP) }
                 }
             }
         }

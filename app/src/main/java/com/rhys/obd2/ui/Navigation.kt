@@ -31,6 +31,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.rhys.obd2.data.ConnectionState
+import com.rhys.obd2.ui.screens.CodeLookupScreen
 import com.rhys.obd2.ui.screens.ConnectScreen
 import com.rhys.obd2.ui.screens.DashboardScreen
 import com.rhys.obd2.ui.screens.DtcScreen
@@ -55,6 +56,7 @@ object Routes {
     const val LOGS = "logs"
     const val TERMINAL = "terminal"
     const val SETTINGS = "settings"
+    const val LOOKUP = "lookup"
 }
 
 private data class Destination(
@@ -155,7 +157,7 @@ fun OpenObdApp(
                     )
                 }
                 composable(Routes.LIVE) { LiveDataScreen(viewModel) }
-                composable(Routes.CODES) { DtcScreen(viewModel) }
+                composable(Routes.CODES) { DtcScreen(viewModel, onLookup = { navController.navigate(Routes.LOOKUP) }) }
                 composable(Routes.HEALTH) {
                     ReadinessScreen(
                         viewModel = viewModel,
@@ -173,6 +175,7 @@ fun OpenObdApp(
                 composable(Routes.LOGS) { LogsScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.TERMINAL) { TerminalScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) { SettingsScreen(viewModel, onBack = { navController.popBackStack() }) }
+                composable(Routes.LOOKUP) { CodeLookupScreen(onBack = { navController.popBackStack() }) }
             }
         }
     }

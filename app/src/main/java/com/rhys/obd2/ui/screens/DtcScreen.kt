@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -63,7 +64,7 @@ import com.rhys.obd2.ui.theme.Warning
 import kotlinx.coroutines.launch
 
 @Composable
-fun DtcScreen(viewModel: ObdViewModel) {
+fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
     val connection by viewModel.connectionState.collectAsState()
     val snapshot by viewModel.dtcs.collectAsState()
     val frame by viewModel.freezeFrame.collectAsState()
@@ -114,6 +115,13 @@ fun DtcScreen(viewModel: ObdViewModel) {
                     accent = Info,
                     text = "Connect to the car to read fault codes.",
                 )
+            }
+            item {
+                OutlinedButton(onClick = onLookup, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Search, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Look up a code without connecting")
+                }
             }
             return@LazyColumn
         }

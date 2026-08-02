@@ -25,6 +25,43 @@ object DtcDatabase {
 
     fun lookup(code: String): Entry? = table[code.uppercase()]
 
+    /** How many codes carry a real description rather than a structural fallback. */
+    val size: Int get() = table.size
+
+    /** A well-formed DTC: one system letter, then four hex digits. */
+    private val CODE_SHAPE = Regex("^[PCBU][0-3][0-9A-F]{3}$")
+
+    fun isWellFormed(code: String): Boolean = CODE_SHAPE.matches(code.trim().uppercase())
+
+    /**
+     * Searches the offline database.
+     *
+     * Matches on the code itself when the query looks like one — so "P01" lists the whole
+     * P01xx family — and on the description otherwise, so "catalyst" or "misfire" finds
+     * the relevant codes without knowing the number. Results are capped because the
+     * matching is done on every keystroke.
+     */
+    fun search(query: String, limit: Int = 60): List<Pair<String, Entry>> {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return emptyList()
+        val upper = trimmed.uppercase()
+
+        val byCode = if (upper.first() in "PCBU") {
+            table.entries.filter { it.key.startsWith(upper) }
+        } else {
+            emptyList()
+        }
+        if (byCode.isNotEmpty()) {
+            return byCode.sortedBy { it.key }.take(limit).map { it.key to it.value }
+        }
+
+        return table.entries
+            .filter { it.value.description.contains(trimmed, ignoreCase = true) }
+            .sortedBy { it.key }
+            .take(limit)
+            .map { it.key to it.value }
+    }
+
     /**
      * Fallback when a code isn't in the table. Decodes what the code's structure alone
      * tells us — the system, whether it's generic or manufacturer-defined, and which

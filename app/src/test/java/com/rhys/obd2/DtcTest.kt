@@ -1,6 +1,7 @@
 package com.rhys.obd2
 
 import com.rhys.obd2.obd.Dtc
+import com.rhys.obd2.obd.DtcDatabase
 import com.rhys.obd2.obd.DtcSeverity
 import com.rhys.obd2.obd.DtcStatus
 import com.rhys.obd2.obd.DtcSystem
@@ -106,6 +107,37 @@ class DtcTest {
         val dtc = Dtc.describe("P0999", DtcStatus.STORED)
         assertFalse(dtc.manufacturerSpecific)
         assertTrue(dtc.description.contains("Transmission", ignoreCase = true))
+    }
+
+    @Test
+    fun `search finds a code family from a partial code`() {
+        val misfires = DtcDatabase.search("P030").map { it.first }
+        assertTrue(misfires.contains("P0301"))
+        assertTrue(misfires.contains("P0304"))
+        // A code-shaped query must not also drag in description matches.
+        assertTrue(misfires.all { it.startsWith("P030") })
+    }
+
+    @Test
+    fun `search falls back to matching the description`() {
+        val results = DtcDatabase.search("catalyst").map { it.first }
+        assertTrue("expected P0420 among $results", results.contains("P0420"))
+    }
+
+    @Test
+    fun `search ignores queries too short to be useful`() {
+        assertTrue(DtcDatabase.search("P").isEmpty())
+    }
+
+    @Test
+    fun `well-formed codes are recognised regardless of case or spacing`() {
+        assertTrue(DtcDatabase.isWellFormed("P0420"))
+        assertTrue(DtcDatabase.isWellFormed(" p0420 "))
+        assertTrue(DtcDatabase.isWellFormed("U0100"))
+        assertFalse(DtcDatabase.isWellFormed("P042"))
+        assertFalse(DtcDatabase.isWellFormed("X0420"))
+        // The second character is the code's definer and only runs 0-3.
+        assertFalse(DtcDatabase.isWellFormed("P9420"))
     }
 
     @Test
