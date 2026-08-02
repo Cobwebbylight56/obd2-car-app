@@ -1,6 +1,7 @@
 package com.rhys.obd2.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,7 +43,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
+fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit, onOpen: (File) -> Unit) {
     val context = LocalContext.current
     var logs by remember { mutableStateOf(viewModel.listLogs()) }
 
@@ -84,13 +85,17 @@ fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
             item(key = log.name) {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clickable { onOpen(log) }
+                        ) {
                             Text(
                                 formatName(log),
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                "${sizeLabel(log.length())} · ${lineCount(log)} rows",
+                                "${sizeLabel(log.length())} · ${lineCount(log)} rows · tap to view",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

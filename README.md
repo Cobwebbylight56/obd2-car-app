@@ -132,6 +132,14 @@ because clearing codes destroys the only record of them — "write them down fir
 standard advice and nobody does it. Plain text on purpose: it pastes into an email or a
 message without the recipient needing this app.
 
+### Trip review
+Tap a recorded trip to plot it. Pick up to four parameters and compare their shapes over
+the drive — a misfire that only appears once coolant temperature passes 90 °C is obvious
+on a chart and invisible in a spreadsheet column. Each line is scaled to its own range
+rather than a shared axis, because plotting a 900 °C catalyst temperature against a ±10 %
+fuel trim renders the trim as a flat line; the legend states each line's range so the
+scaling is never implicit.
+
 ### Offline code lookup
 Search the built-in code database with no adapter and no car — for when a garage quotes
 you a code over the phone. Searches by number (`P0420`, or `P03` for the whole misfire

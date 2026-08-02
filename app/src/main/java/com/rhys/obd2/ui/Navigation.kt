@@ -23,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -41,6 +42,7 @@ import com.rhys.obd2.ui.screens.MonitorTestScreen
 import com.rhys.obd2.ui.screens.MoreScreen
 import com.rhys.obd2.ui.screens.ReadinessScreen
 import com.rhys.obd2.ui.screens.SettingsScreen
+import com.rhys.obd2.ui.screens.TripDetailScreen
 import com.rhys.obd2.ui.screens.TerminalScreen
 import com.rhys.obd2.ui.screens.VehicleInfoScreen
 
@@ -57,6 +59,7 @@ object Routes {
     const val TERMINAL = "terminal"
     const val SETTINGS = "settings"
     const val LOOKUP = "lookup"
+    const val TRIP = "trip"
 }
 
 private data class Destination(
@@ -172,7 +175,21 @@ fun OpenObdApp(
                 }
                 composable(Routes.VEHICLE) { VehicleInfoScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.TESTS) { MonitorTestScreen(viewModel, onBack = { navController.popBackStack() }) }
-                composable(Routes.LOGS) { LogsScreen(viewModel, onBack = { navController.popBackStack() }) }
+                composable(Routes.LOGS) {
+                    LogsScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onOpen = { file -> navController.navigate("${Routes.TRIP}/${file.name}") },
+                    )
+                }
+                composable("${Routes.TRIP}/{name}") { entry ->
+                    val name = entry.arguments?.getString("name").orEmpty()
+                    val context = LocalContext.current
+                    TripDetailScreen(
+                        file = java.io.File(java.io.File(context.filesDir, "logs"), name),
+                        onBack = { navController.popBackStack() },
+                    )
+                }
                 composable(Routes.TERMINAL) { TerminalScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) { SettingsScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.LOOKUP) { CodeLookupScreen(onBack = { navController.popBackStack() }) }

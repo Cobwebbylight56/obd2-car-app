@@ -211,3 +211,68 @@ class UnitsTest {
         assertEquals("1.023", Units.format(1.0234, "λ"))
     }
 }
+
+class TripLogTest {
+
+    private fun write(vararg lines: String): java.io.File {
+        val file = java.io.File.createTempFile("trip", ".csv")
+        file.writeText(lines.joinToString("\n"))
+        file.deleteOnExit()
+        return file
+    }
+
+    @Test
+    fun `parses the shape the logger writes`() {
+        val log = com.rhys.obd2.data.TripLog.parse(
+            write(
+                "timestamp,elapsed_s,Engine RPM (rpm),Vehicle speed (km/h)",
+                "1000,0.00,800.000,0.000",
+                "1500,0.50,1200.000,10.000",
+                "2000,1.00,1600.000,20.000",
+            )
+        )!!
+        assertEquals(3, log.sampleCount)
+        assertEquals(1.0f, log.durationSeconds, 0.001f)
+        assertEquals(2, log.series.size)
+        assertEquals("Engine RPM", log.series[0].label)
+        assertEquals("rpm", log.series[0].unit)
+        assertEquals(800.0f, log.series[0].min!!, 0.001f)
+        assertEquals(1600.0f, log.series[0].max!!, 0.001f)
+        assertEquals(1200.0f, log.series[0].mean!!, 0.001f)
+    }
+
+    @Test
+    fun `treats an empty cell as a gap rather than a zero`() {
+        // The logger leaves a cell empty when that PID hasn't been read yet. Reading it
+        // as 0 would draw a spike to the floor and invent a fault that never happened.
+        val log = com.rhys.obd2.data.TripLog.parse(
+            write(
+                "timestamp,elapsed_s,Coolant (°C)",
+                "1000,0.00,",
+                "1500,0.50,90.000",
+            )
+        )!!
+        assertNull(log.series[0].values[0])
+        assertEquals(90.0f, log.series[0].values[1]!!, 0.001f)
+        assertEquals(90.0f, log.series[0].min!!, 0.001f)
+    }
+
+    @Test
+    fun `ignores a log with only a header`() {
+        assertNull(com.rhys.obd2.data.TripLog.parse(write("timestamp,elapsed_s,Engine RPM (rpm)")))
+    }
+
+    @Test
+    fun `only offers series that recorded something`() {
+        val log = com.rhys.obd2.data.TripLog.parse(
+            write(
+                "timestamp,elapsed_s,Engine RPM (rpm),Never read (%)",
+                "1000,0.00,800.000,",
+                "1500,0.50,900.000,",
+            )
+        )!!
+        assertEquals(2, log.series.size)
+        assertEquals(1, log.populated.size)
+        assertEquals("Engine RPM", log.populated[0].label)
+    }
+}
