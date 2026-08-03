@@ -12,6 +12,9 @@ app/build/
 *.apk
 *.aab
 *.keystore
+# ...except the fixed debug key, which has to be committed for CI builds to keep the
+# same signature. See app/build.gradle.kts for why that is safe.
+!keystore/debug.keystore
 !gradle/wrapper/gradle-wrapper.jar
 compile.log
 test.log

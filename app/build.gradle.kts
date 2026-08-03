@@ -16,9 +16,30 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        // A fixed debug key, committed to the repository on purpose.
+        //
+        // Without it, the Android plugin generates a throwaway debug keystore on each CI
+        // runner, so every build is signed with a different key and Android refuses to
+        // install one over another — "App not installed", signature mismatch. Updating
+        // then means uninstalling first, which takes the app's settings and every
+        // recorded trip log with it.
+        //
+        // A debug key is not a meaningful secret: it grants nothing, and AOSP's own is
+        // public. It must never be used to sign anything published to an app store, and
+        // it isn't — only the debug build type references it.
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = false

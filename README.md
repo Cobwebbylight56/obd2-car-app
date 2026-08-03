@@ -29,6 +29,15 @@ git tag v1.0.0 && git push origin v1.0.0
 
 That publishes the APK to the repository's Releases page.
 
+### Updating later
+
+Newer builds install straight over an older one — no need to uninstall, and settings and
+recorded trips survive. That works because the debug signing key is committed to the
+repository (`keystore/debug.keystore`) rather than generated fresh on each CI runner; if
+it weren't, every build would carry a different signature and Android would refuse the
+update. A debug key grants nothing and AOSP's own is public, so committing it is safe —
+but it signs debug builds only and must never be used for anything published to a store.
+
 ### Or build it yourself
 
 ```bash
