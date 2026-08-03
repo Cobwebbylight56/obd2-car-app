@@ -49,6 +49,38 @@ object ObdParser {
     }
 
     /**
+     * Every complete message in a response, for services whose reply can span several.
+     *
+     * This exists for the pre-CAN protocols. ISO 9141-2 and KWP2000 carry at most three
+     * DTCs per message and simply send more messages when there are more codes, so a car
+     * with five faults answers with two lines:
+     *
+     *   43 01 33 04 20 01 71
+     *   43 02 15 00 00 00 00
+     *
+     * [parse] deliberately keeps only one line, because on CAN several lines means
+     * several ECUs answering the same question and concatenating them would corrupt the
+     * value. For the DTC services that rule is wrong and loses every code after the
+     * third. CAN's own multi-line form is the indexed ISO-TP one, which is reassembled
+     * into a single payload and returned here as one message.
+     */
+    fun parseMessages(raw: String, mode: Int): List<IntArray> {
+        val expected = "%02X".format((mode + 0x40) and 0xFF)
+
+        // Indexed continuation lines are one logical message split by the adapter, so the
+        // normal reassembly path is right and per-line splitting would be wrong.
+        if (cleanLines(raw).any { INDEXED_LINE.matches(it) }) {
+            return listOfNotNull(parse(raw, mode, null))
+        }
+
+        return cleanLines(raw).mapNotNull { line ->
+            val hex = line.replace(Regex("[^0-9A-F]"), "")
+            val start = findMarker(hex, expected) ?: return@mapNotNull null
+            hexToBytes(hex.substring(start + expected.length)).takeIf { it.isNotEmpty() }
+        }
+    }
+
+    /**
      * Same as [parse] but keeps every ECU's answer separately, which matters for cars
      * with more than one controller responding to the same request.
      */

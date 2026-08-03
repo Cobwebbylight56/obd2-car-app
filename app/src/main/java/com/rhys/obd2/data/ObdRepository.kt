@@ -489,7 +489,17 @@ class ObdRepository(
         }
         // NO_DATA here is the normal, healthy answer: it means no codes of that kind.
         if (!result.isSuccess) return emptyList()
-        return Dtc.decodeList(result.data, status)
+
+        // Each message is decoded on its own rather than concatenating the bytes first:
+        // every message carries its own padding, and on CAN its own leading count byte,
+        // so merging the raw bytes would confuse the alignment detection.
+        val messages = ObdParser.parseMessages(result.raw, mode)
+        return when {
+            messages.size > 1 -> messages
+                .flatMap { Dtc.decodeList(it, status) }
+                .distinctBy { it.code }
+            else -> Dtc.decodeList(result.data, status)
+        }
     }
 
     /**

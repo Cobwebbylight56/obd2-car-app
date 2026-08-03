@@ -1,6 +1,8 @@
 package com.rhys.obd2
 
 import com.rhys.obd2.elm.ObdParser
+import com.rhys.obd2.obd.Dtc
+import com.rhys.obd2.obd.DtcStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -69,6 +71,37 @@ class ObdParserTest {
         assertEquals(2, perEcu.size)
         assertEquals(0x5A, perEcu[0][0])
         assertEquals(0x5C, perEcu[1][0])
+    }
+
+    @Test
+    fun `keeps every message when a pre-CAN car splits its codes across lines`() {
+        // ISO 9141-2 and KWP2000 fit three DTCs per message. Five codes therefore arrive
+        // as two messages, and keeping only the longest line would lose the last two.
+        val raw = "43 01 33 04 20 01 71\r43 02 15 03 01 00 00"
+        val messages = ObdParser.parseMessages(raw, mode = 0x03)
+        assertEquals(2, messages.size)
+
+        val codes = messages.flatMap { Dtc.decodeList(it, DtcStatus.STORED) }.map { it.code }
+        assertEquals(listOf("P0133", "P0420", "P0171", "P0215", "P0301"), codes)
+    }
+
+    @Test
+    fun `treats an indexed CAN response as the single message it is`() {
+        // The indexed form is one logical message the adapter split up, so it must be
+        // reassembled rather than treated as several independent messages.
+        val raw = """
+            00A
+            0: 43 04 01 33 04 20
+            1: 01 71 02 15 00 00
+        """.trimIndent()
+        assertEquals(1, ObdParser.parseMessages(raw, mode = 0x03).size)
+    }
+
+    @Test
+    fun `single-message responses still work through parseMessages`() {
+        val messages = ObdParser.parseMessages("43 01 33 04 20 01 71", mode = 0x03)
+        assertEquals(1, messages.size)
+        assertEquals(listOf(0x01, 0x33, 0x04, 0x20, 0x01, 0x71), messages[0].toList())
     }
 
     @Test
