@@ -1,5 +1,7 @@
 package com.rhys.obd2.ui.screens
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,9 +43,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.rhys.obd2.data.ConnectionState
 import com.rhys.obd2.transport.DeviceScanner
 import com.rhys.obd2.transport.WifiTransport
@@ -66,6 +72,7 @@ fun ConnectScreen(
     val devices by viewModel.scanResults.collectAsState()
     val scanning by viewModel.scanning.collectAsState()
     var showWifiDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val autoConnect by viewModel.settings.autoConnect.collectAsState()
 
@@ -75,6 +82,19 @@ fun ConnectScreen(
     DisposableEffect(permissionsGranted) {
         if (permissionsGranted) viewModel.startScan()
         onDispose { viewModel.stopScan() }
+    }
+
+    // Coming back from Android's Bluetooth settings is the moment a newly paired classic
+    // adapter becomes visible, and nothing else would prompt a re-read.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, permissionsGranted) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && permissionsGranted) {
+                viewModel.refreshPairedDevices()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Reconnect to the adapter used last time, once, if the user has asked for that.
@@ -154,10 +174,15 @@ fun ConnectScreen(
                 } else if (devices.isEmpty()) {
                     Text(
                         if (scanning) {
-                            "Looking for Bluetooth adapters. Make sure the dongle is plugged into the " +
-                                "OBD port and the ignition is on — most adapters have no power otherwise."
+                            "Looking for adapters. Make sure the dongle is plugged into the OBD port " +
+                                "and the ignition is on — most have no power otherwise.\n\n" +
+                                "If yours is a classic Bluetooth dongle — the sort sold as \"Android " +
+                                "and Windows only\" — it will not appear here until it has been paired " +
+                                "in Android's Bluetooth settings. Use the button below, pair it (the " +
+                                "PIN is almost always 1234 or 0000), then come back."
                         } else {
-                            "Nothing found yet. Check the adapter is plugged in and Bluetooth is on."
+                            "Nothing found. Check the adapter is plugged in and Bluetooth is on. " +
+                                "Classic Bluetooth dongles must be paired in Android's settings first."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -191,6 +216,18 @@ fun ConnectScreen(
                         Icon(Icons.Filled.Wifi, contentDescription = null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Wi-Fi adapter")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Bluetooth, contentDescription = null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pair a classic adapter")
                     }
                     OutlinedButton(
                         onClick = { viewModel.connectDemo() },

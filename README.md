@@ -52,9 +52,11 @@ Requires JDK 17 and the Android SDK (API 35). Minimum supported phone is Android
 **Bluetooth LE adapters** (Vgate iCar Pro, OBDLink CX, LELink, most modern ones) just
 appear in the scan list — no pairing needed.
 
-**Classic Bluetooth adapters** (the cheap blue ELM327 dongles) must be paired in Android's
-own Bluetooth settings first. The PIN is almost always `1234` or `0000`. After that they
-show up in the app.
+**Classic Bluetooth adapters** — anything sold as "for Android and Windows only" is one of
+these, because iOS can't use Bluetooth SPP without MFi certification, so excluding iPhone
+is the giveaway. They must be paired in Android's own Bluetooth settings before the app
+can see them; the PIN is almost always `1234` or `0000`. The connect screen has a button
+that takes you straight there, and re-reads the paired list when you come back.
 
 **Wi-Fi adapters** host their own network. Join it in Android's Wi-Fi settings, then use
 *Other ways to connect → Wi-Fi adapter*. The default `192.168.0.10:35000` is right for

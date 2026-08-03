@@ -80,6 +80,23 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Re-reads Android's paired-device list and merges it into the results.
+     *
+     * Classic Bluetooth adapters — the cheap ELM327 dongles that say "Android and Windows
+     * only" — never show up in a BLE scan and only become visible once they're paired in
+     * Android's own settings. The normal sequence is therefore: open the app, see nothing,
+     * leave to pair, come back. Without this the list is still stale on return and the
+     * adapter appears to be unsupported.
+     */
+    fun refreshPairedDevices() {
+        val paired = app.scanner.bondedDevices()
+        val existing = _scanResults.value
+        _scanResults.value = existing + paired.filter { new ->
+            existing.none { it.address == new.address }
+        }
+    }
+
     fun stopScan() {
         scanJob?.cancel()
         scanJob = null

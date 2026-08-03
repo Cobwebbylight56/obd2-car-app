@@ -98,14 +98,23 @@ class ClassicBtTransport(
 
         var lastError: Exception? = null
         for ((label, open) in attempts) {
+            var sock: BluetoothSocket? = null
             try {
-                val sock = open()
+                sock = open()
                 sock.connect()
                 Log.i(TAG, "Connected to ${device.name} via $label")
+                // Cheap clones are not ready the instant the socket opens; commands sent
+                // immediately are answered with garbage or not at all. A short settle is
+                // far cheaper than the ten-second ATZ timeout it otherwise costs.
+                Thread.sleep(SETTLE_MS)
                 return sock
             } catch (e: Exception) {
                 Log.w(TAG, "$label failed: ${e.message}")
                 lastError = e
+                // Closing the failed socket matters more than it looks. A half-open
+                // RFCOMM socket left behind makes the next connect fail too on most
+                // Android stacks, which would defeat the very fallbacks below it.
+                runCatching { sock?.close() }
             }
         }
         throw ObdConnectionException(
@@ -160,6 +169,9 @@ class ClassicBtTransport(
 
     companion object {
         private const val TAG = "ClassicBtTransport"
+
+        /** Settle time after the socket opens, before the first command. */
+        private const val SETTLE_MS = 400L
         val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     }
 }
