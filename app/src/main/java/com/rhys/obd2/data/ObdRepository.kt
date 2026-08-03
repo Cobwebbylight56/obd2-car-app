@@ -162,6 +162,13 @@ class ObdRepository(
     }
 
     val tripLogger = TripLogger(context)
+    val garage = Garage(context)
+
+    private val abnormalMonitor = AbnormalReadingMonitor()
+
+    /** The car currently plugged in, once it has been identified. */
+    private val _currentVehicle = MutableStateFlow<Vehicle?>(null)
+    val currentVehicle: StateFlow<Vehicle?> = _currentVehicle.asStateFlow()
 
     private var pollJob: Job? = null
     private var pollTargets: List<Int> = emptyList()
@@ -246,7 +253,16 @@ class ObdRepository(
             batteryVoltage = init.batteryVoltage,
         )
 
-        scope.launch { discoverSupportedPids() }
+        abnormalMonitor.reset()
+
+        scope.launch {
+            discoverSupportedPids()
+            // Identifying needs the VIN, so this waits for the service 09 read rather
+            // than racing it — a car filed under "unidentified" and then again under its
+            // VIN would split its own history in two.
+            refreshVehicleInfo()
+            _currentVehicle.value = garage.identify(_vehicleInfo.value, device.address)
+        }
     }
 
     fun disconnect() {
@@ -399,6 +415,25 @@ class ObdRepository(
         if (readings.isEmpty()) return
 
         val now = System.currentTimeMillis()
+
+        // A reading outside its healthy range is worth a dated note in the car's history,
+        // whether or not the ECU ever considers it bad enough to store a code.
+        readings.firstOrNull()?.let { primary ->
+            abnormalMonitor.observe(pidId, primary.value)?.let { abnormal ->
+                _currentVehicle.value?.let { vehicle ->
+                    garage.record(
+                        vehicle.key,
+                        VehicleHistoryEvent(
+                            timestamp = now,
+                            type = EventType.ABNORMAL,
+                            title = "${abnormal.label}: ${"%.1f".format(java.util.Locale.UK, abnormal.value)} ${abnormal.unit}".trim(),
+                            detail = "${abnormal.severity.label}. ${abnormal.message}",
+                        ),
+                    )
+                }
+            }
+        }
+
         _liveData.update { current ->
             val previous = current[pidId]
             val history = ((previous?.history ?: emptyList()) + readings.first().value.toFloat())
@@ -443,6 +478,7 @@ class ObdRepository(
                 milOn = readinessData?.milOn ?: stored.isNotEmpty(),
             )
             _dtcs.value = snapshot
+            recordCodesIfChanged(snapshot)
             return@exclusive snapshot
         }
     }
@@ -467,6 +503,13 @@ class ObdRepository(
      */
     suspend fun clearDtcs(): ClearResult {
         val session = elm ?: return ClearResult(false, "Not connected to the car")
+
+        // Snapshot the codes and freeze frame into the car's history first. Once mode 04
+        // runs they are gone from the ECU for good, and the history is then the only
+        // record that this fault ever happened — which is the difference between "a new
+        // fault" and "the same fault for the fourth time".
+        recordClearedCodes()
+
         return exclusive("Clearing codes") {
             val result = adapterLock.withLock {
                 session.obd(0x04, null, timeoutMs = Elm327.SLOW_TIMEOUT_MS)
@@ -499,6 +542,81 @@ class ObdRepository(
     }
 
     data class ClearResult(val success: Boolean, val message: String)
+
+    /**
+     * Logs a fault-code event only when the set of codes has changed since last time.
+     *
+     * Reading codes three times in a row is one fact, not three, and a history padded
+     * with duplicates is a history nobody reads.
+     */
+    private fun recordCodesIfChanged(snapshot: DtcSnapshot) {
+        val vehicle = _currentVehicle.value ?: return
+        val current = snapshot.all.map { it.code }.toSet()
+        if (current == vehicle.lastCodes) return
+
+        if (current.isNotEmpty()) {
+            garage.record(
+                vehicle.key,
+                VehicleHistoryEvent(
+                    timestamp = System.currentTimeMillis(),
+                    type = EventType.CODES_FOUND,
+                    title = "${current.size} fault code${if (current.size == 1) "" else "s"} present",
+                    detail = snapshot.all.joinToString("\n") { "${it.code} — ${it.description}" },
+                ),
+            )
+        }
+        garage.updateLastCodes(vehicle.key, current)
+        _currentVehicle.value = garage.vehicle(vehicle.key)
+    }
+
+    /** Writes the current codes and freeze frame to history before mode 04 erases them. */
+    private fun recordClearedCodes() {
+        val vehicle = _currentVehicle.value ?: return
+        val snapshot = _dtcs.value
+        val frame = _freezeFrame.value
+
+        val detail = buildString {
+            if (snapshot == null || snapshot.total == 0) {
+                append("No codes were stored at the time of clearing.")
+            } else {
+                appendLine("Codes erased:")
+                snapshot.all.forEach { appendLine("  ${it.code} — ${it.description}") }
+            }
+            if (frame != null && frame.values.isNotEmpty()) {
+                appendLine()
+                appendLine("Conditions when the fault was stored:")
+                frame.values.forEach { (pid, readings) ->
+                    readings.firstOrNull()?.let { reading ->
+                        appendLine("  ${pid.name}: ${"%.1f".format(java.util.Locale.UK, reading.value)} ${reading.unit}".trimEnd())
+                    }
+                }
+            }
+        }.trim()
+
+        val count = snapshot?.total ?: 0
+        garage.record(
+            vehicle.key,
+            VehicleHistoryEvent(
+                timestamp = System.currentTimeMillis(),
+                type = EventType.CODES_CLEARED,
+                title = if (count == 0) "Codes cleared (none stored)"
+                        else "$count code${if (count == 1) "" else "s"} cleared",
+                detail = detail,
+            ),
+        )
+        // The car now has no codes, so the next read is a genuinely new observation.
+        garage.updateLastCodes(vehicle.key, emptySet())
+        _currentVehicle.value = garage.vehicle(vehicle.key)
+    }
+
+    /** Called by the view model when a trip recording finishes. */
+    fun recordTrip(summary: String, detail: String) {
+        val vehicle = _currentVehicle.value ?: return
+        garage.record(
+            vehicle.key,
+            VehicleHistoryEvent(System.currentTimeMillis(), EventType.TRIP, summary, detail),
+        )
+    }
 
     // ---------------------------------------------------------------------------------
     // Readiness, freeze frame, service 06

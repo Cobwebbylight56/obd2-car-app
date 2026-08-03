@@ -8,6 +8,7 @@ import com.rhys.obd2.data.ConnectionState
 import com.rhys.obd2.data.DiagnosticReport
 import com.rhys.obd2.data.ObdForegroundService
 import com.rhys.obd2.data.ObdRepository
+import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.obd.PidRegistry
 import com.rhys.obd2.transport.AdapterDevice
 import com.rhys.obd2.transport.AdapterKind
@@ -43,6 +44,9 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     val busy get() = repository.busy
     val isLogging get() = repository.tripLogger.isLogging
     val tripStats get() = repository.tripLogger.stats
+
+    val vehicles get() = repository.garage.vehicles
+    val currentVehicle get() = repository.currentVehicle
 
     private val _scanResults = MutableStateFlow<List<AdapterDevice>>(emptyList())
     val scanResults: StateFlow<List<AdapterDevice>> = _scanResults.asStateFlow()
@@ -198,9 +202,25 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopLogging(): File? {
+        val stats = repository.tripLogger.stats.value
         val file = repository.tripLogger.stop()
         ObdForegroundService.stop(getApplication())
-        if (file != null) _message.value = "Saved ${file.name}"
+        if (file != null) {
+            _message.value = "Saved ${file.name}"
+            stats?.let {
+                repository.recordTrip(
+                    summary = "Trip recorded — %.1f km".format(java.util.Locale.UK, it.distanceKm),
+                    detail = buildString {
+                        appendLine("Duration: ${it.durationMs / 60000} min")
+                        appendLine("Distance: %.1f km".format(java.util.Locale.UK, it.distanceKm))
+                        appendLine("Top speed: %.0f km/h".format(java.util.Locale.UK, it.maxSpeed))
+                        appendLine("Max RPM: %.0f".format(java.util.Locale.UK, it.maxRpm))
+                        appendLine("Max coolant: %.0f °C".format(java.util.Locale.UK, it.maxCoolant))
+                        append("Log file: ${file.name}")
+                    },
+                )
+            }
+        }
         return file
     }
 
@@ -229,6 +249,28 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         return runCatching { DiagnosticReport.save(getApplication(), text) }
             .onFailure { _message.value = "Couldn't save the report: ${it.message}" }
             .getOrNull()
+    }
+
+    // -----------------------------------------------------------------------------
+    // Garage
+    // -----------------------------------------------------------------------------
+
+    fun historyFor(key: String): List<VehicleHistoryEvent> = repository.garage.events(key)
+
+    fun historySize(key: String): String {
+        val bytes = repository.garage.storageBytes(key)
+        return when {
+            bytes >= 1_048_576 -> "%.1f MB".format(java.util.Locale.UK, bytes / 1_048_576.0)
+            bytes >= 1024 -> "%.0f KB".format(java.util.Locale.UK, bytes / 1024.0)
+            else -> "$bytes B"
+        }
+    }
+
+    fun renameVehicle(key: String, name: String) = repository.garage.rename(key, name)
+
+    fun deleteVehicle(key: String) {
+        repository.garage.delete(key)
+        _message.value = "Car and its history deleted"
     }
 
     fun listLogs(): List<File> = repository.tripLogger.listLogs()

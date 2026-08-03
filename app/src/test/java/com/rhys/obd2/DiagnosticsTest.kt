@@ -276,3 +276,106 @@ class TripLogTest {
         assertEquals("Engine RPM", log.populated[0].label)
     }
 }
+
+class GarageStorageTest {
+
+    @Test
+    fun `event round trips through the storage format`() {
+        val event = com.rhys.obd2.data.VehicleHistoryEvent(
+            timestamp = 1_700_000_000_000L,
+            type = com.rhys.obd2.data.EventType.CODES_CLEARED,
+            title = "3 codes cleared",
+            detail = "P0301 — Cylinder 1 misfire\nP0420 — Catalyst below threshold",
+        )
+        val decoded = com.rhys.obd2.data.Garage.decode(com.rhys.obd2.data.Garage.encode(event))!!
+        assertEquals(event, decoded)
+    }
+
+    @Test
+    fun `detail containing tabs and newlines survives`() {
+        // The format is tab-separated, so an unescaped tab in a detail would silently
+        // shift every field after it and lose the record.
+        val nasty = "line one\tcolumn\nline two\\backslash"
+        val event = com.rhys.obd2.data.VehicleHistoryEvent(
+            1L, com.rhys.obd2.data.EventType.ABNORMAL, "Odd\treading", nasty,
+        )
+        val encoded = com.rhys.obd2.data.Garage.encode(event)
+        assertEquals(4, encoded.split('\t').size)
+        assertEquals(event, com.rhys.obd2.data.Garage.decode(encoded))
+    }
+
+    @Test
+    fun `a corrupt line is skipped rather than crashing the history`() {
+        assertNull(com.rhys.obd2.data.Garage.decode("not a real line"))
+        assertNull(com.rhys.obd2.data.Garage.decode("123\tNOT_A_TYPE\ttitle\tdetail"))
+        assertNull(com.rhys.obd2.data.Garage.decode(""))
+    }
+}
+
+class AbnormalReadingMonitorTest {
+
+    private fun monitor() = com.rhys.obd2.data.AbnormalReadingMonitor()
+
+    @Test
+    fun `flags a genuine overheat`() {
+        val m = monitor()
+        assertNull(m.observe(0x05, 90.0))
+        val hit = m.observe(0x05, 118.0)!!
+        assertEquals(com.rhys.obd2.data.AbnormalSeverity.SERIOUS, hit.severity)
+        assertTrue(hit.message.contains("cool", ignoreCase = true))
+    }
+
+    @Test
+    fun `reports each rule once per session`() {
+        val m = monitor()
+        assertNotNull(m.observe(0x05, 120.0))
+        // A fault that persists for ten minutes is one event, not four hundred.
+        assertNull(m.observe(0x05, 121.0))
+        assertNull(m.observe(0x05, 125.0))
+        m.reset()
+        assertNotNull(m.observe(0x05, 120.0))
+    }
+
+    @Test
+    fun `does not call a resting battery a charging fault`() {
+        val m = monitor()
+        // Ignition on, engine off: 12.4 V is a healthy battery, not a dead alternator.
+        assertNull(m.observe(0x42, 12.4))
+        assertNull(m.observe(0x0C, 0.0))
+        assertNull(m.observe(0x42, 12.3))
+    }
+
+    @Test
+    fun `flags low charging voltage once the engine is running`() {
+        val m = monitor()
+        m.observe(0x0C, 800.0)
+        val hit = m.observe(0x42, 12.1)!!
+        assertEquals(com.rhys.obd2.data.AbnormalSeverity.SERIOUS, hit.severity)
+        assertTrue(hit.message.contains("alternator", ignoreCase = true))
+    }
+
+    @Test
+    fun `ignores fuel trims until the engine is warm`() {
+        val m = monitor()
+        m.observe(0x0C, 900.0)
+        m.observe(0x05, 20.0)
+        // Trims swing wildly on a cold engine in open loop; flagging them is noise.
+        assertNull(m.observe(0x07, 30.0))
+
+        val warm = monitor()
+        warm.observe(0x0C, 900.0)
+        warm.observe(0x05, 88.0)
+        assertNotNull(warm.observe(0x07, 30.0))
+    }
+
+    @Test
+    fun `leaves healthy readings alone`() {
+        val m = monitor()
+        m.observe(0x0C, 850.0)
+        m.observe(0x05, 90.0)
+        assertNull(m.observe(0x42, 14.1))
+        assertNull(m.observe(0x07, 3.0))
+        assertNull(m.observe(0x0F, 25.0))
+        assertNull(m.observe(0x5C, 95.0))
+    }
+}

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
@@ -36,6 +37,7 @@ import com.rhys.obd2.ui.screens.CodeLookupScreen
 import com.rhys.obd2.ui.screens.ConnectScreen
 import com.rhys.obd2.ui.screens.DashboardScreen
 import com.rhys.obd2.ui.screens.DtcScreen
+import com.rhys.obd2.ui.screens.GarageScreen
 import com.rhys.obd2.ui.screens.LiveDataScreen
 import com.rhys.obd2.ui.screens.LogsScreen
 import com.rhys.obd2.ui.screens.MonitorTestScreen
@@ -52,6 +54,7 @@ object Routes {
     const val LIVE = "live"
     const val CODES = "codes"
     const val HEALTH = "health"
+    const val GARAGE = "garage"
     const val MORE = "more"
     const val VEHICLE = "vehicle"
     const val TESTS = "tests"
@@ -76,6 +79,7 @@ private val BOTTOM_BAR = listOf(
     Destination(Routes.LIVE, "Live", Icons.Filled.BarChart),
     Destination(Routes.CODES, "Codes", Icons.Filled.Warning),
     Destination(Routes.HEALTH, "Health", Icons.Filled.VerifiedUser),
+    Destination(Routes.GARAGE, "Garage", Icons.Filled.DirectionsCar),
     Destination(Routes.MORE, "More", Icons.Filled.MoreHoriz),
 )
 
@@ -167,6 +171,7 @@ fun OpenObdApp(
                         onOpenTests = { navController.navigate(Routes.TESTS) },
                     )
                 }
+                composable(Routes.GARAGE) { GarageScreen(viewModel) }
                 composable(Routes.MORE) {
                     MoreScreen(
                         viewModel = viewModel,

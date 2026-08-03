@@ -143,6 +143,27 @@ because clearing codes destroys the only record of them — "write them down fir
 standard advice and nobody does it. Plain text on purpose: it pastes into an email or a
 message without the recipient needing this app.
 
+### Garage — per-car history
+Every car you plug into is added automatically, identified by its VIN, and you can name
+it whatever you'll recognise. From then on the app keeps a dated record of that specific
+car: fault codes as they appear, unusual readings, recorded trips.
+
+The point is that it **survives clearing codes**. Erasing codes wipes them, the freeze
+frame and the readiness state from the ECU — so without a record kept outside the car
+there is no way to tell a fault that has come back four times from one that has just
+appeared, and that distinction is usually the whole diagnosis. The history captures the
+codes and the freeze frame conditions immediately before mode 04 runs.
+
+Unusual readings are recorded with the time they happened — overheating, a charging
+system that isn't charging, fuel trims drifting out of range, catalyst temperatures high
+enough to do damage. The detection is deliberately conservative about context: charging
+rules only apply with the engine actually running, because 12.4 V is a healthy battery at
+rest and a failing alternator under load, and fuel trims are ignored until the engine is
+warm. Each rule reports once per connection rather than once per reading, because a
+monitor that fires constantly is one you learn to ignore.
+
+Deleting a car removes it and its entire history in one go, for when the car is sold.
+
 ### Trip review
 Tap a recorded trip to plot it. Pick up to four parameters and compare their shapes over
 the drive — a misfire that only appears once coolant temperature passes 90 °C is obvious

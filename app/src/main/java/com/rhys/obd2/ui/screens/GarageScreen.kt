@@ -1,0 +1,405 @@
+package com.rhys.obd2.ui.screens
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.rhys.obd2.data.EventType
+import com.rhys.obd2.data.Vehicle
+import com.rhys.obd2.data.VehicleHistoryEvent
+import com.rhys.obd2.ui.ObdViewModel
+import com.rhys.obd2.ui.components.ExplainerCard
+import com.rhys.obd2.ui.components.InfoRow
+import com.rhys.obd2.ui.components.SectionCard
+import com.rhys.obd2.ui.components.StatusPill
+import com.rhys.obd2.ui.theme.Accent
+import com.rhys.obd2.ui.theme.Danger
+import com.rhys.obd2.ui.theme.Info
+import com.rhys.obd2.ui.theme.Warning as WarningColour
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Per-car history that survives the car's own memory.
+ *
+ * Clearing fault codes wipes the ECU. Everything recorded here stays, so a fault that has
+ * come back four times looks different from one that has just appeared — which is usually
+ * the difference between guessing and knowing.
+ */
+@Composable
+fun GarageScreen(viewModel: ObdViewModel) {
+    val vehicles by viewModel.vehicles.collectAsState()
+    val current by viewModel.currentVehicle.collectAsState()
+
+    var selectedKey by remember { mutableStateOf<String?>(null) }
+    val selected = vehicles.firstOrNull { it.key == (selectedKey ?: current?.key) }
+        ?: vehicles.firstOrNull()
+
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Garage", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(
+                if (vehicles.isEmpty()) "No cars recorded yet"
+                else "${vehicles.size} car${if (vehicles.size == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (vehicles.isEmpty()) {
+            item {
+                ExplainerCard(
+                    accent = Info,
+                    text = "Connect to a car and it gets added here automatically, identified by its " +
+                        "VIN. From then on every fault code, unusual reading and recorded trip is " +
+                        "kept with a date and time — including codes you later clear, which the car " +
+                        "itself forgets the moment you erase them.",
+                )
+            }
+            return@LazyColumn
+        }
+
+        // Car picker, only when there's a choice to make.
+        if (vehicles.size > 1) {
+            item {
+                SectionCard(title = "Cars") {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        vehicles.forEach { vehicle ->
+                            VehicleRow(
+                                vehicle = vehicle,
+                                isSelected = vehicle.key == selected?.key,
+                                isConnected = vehicle.key == current?.key,
+                                onClick = { selectedKey = vehicle.key },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        val vehicle = selected ?: return@LazyColumn
+        val events = viewModel.historyFor(vehicle.key)
+
+        item {
+            SectionCard(
+                title = vehicle.name,
+                subtitle = vehicle.vin ?: "No VIN reported by this car",
+                trailing = {
+                    Row {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Rename",
+                            tint = Accent,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable { renaming = true }
+                                .padding(7.dp),
+                        )
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete this car",
+                            tint = Danger,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable { deleting = true }
+                                .padding(7.dp),
+                        )
+                    }
+                },
+            ) {
+                Column {
+                    if (vehicle.key == current?.key) {
+                        StatusPill("Plugged in now", Accent)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    vehicle.manufacturer?.let { InfoRow("Manufacturer", it) }
+                    vehicle.modelYear?.let { InfoRow("Model year", it) }
+                    InfoRow("First seen", formatDate(vehicle.firstSeen))
+                    InfoRow("Last seen", formatDate(vehicle.lastSeen))
+                    InfoRow("History", "${events.size} entries · ${viewModel.historySize(vehicle.key)}")
+
+                    if (!vehicle.identifiedByVin) {
+                        Spacer(Modifier.height(10.dp))
+                        ExplainerCard(
+                            accent = WarningColour,
+                            text = "This car doesn't report a VIN — common before about 2008 — so it's " +
+                                "identified by its ECU calibration or the adapter used. Reading two " +
+                                "different VIN-less cars with the same adapter could merge their " +
+                                "histories.",
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
+                "History",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        if (events.isEmpty()) {
+            item {
+                ExplainerCard(
+                    accent = Info,
+                    text = "Nothing recorded for this car yet. Fault codes, unusual readings and " +
+                        "recorded trips will appear here as they happen.",
+                )
+            }
+        }
+
+        for (event in events) {
+            item(key = "${event.timestamp}-${event.title}") { HistoryCard(event) }
+        }
+
+        item { Spacer(Modifier.height(32.dp)) }
+    }
+
+    if (renaming && selected != null) {
+        RenameDialog(
+            current = selected.name,
+            onDismiss = { renaming = false },
+            onConfirm = { name ->
+                renaming = false
+                viewModel.renameVehicle(selected.key, name)
+            },
+        )
+    }
+
+    if (deleting && selected != null) {
+        DeleteDialog(
+            vehicle = selected,
+            entryCount = viewModel.historyFor(selected.key).size,
+            size = viewModel.historySize(selected.key),
+            onDismiss = { deleting = false },
+            onConfirm = {
+                deleting = false
+                selectedKey = null
+                viewModel.deleteVehicle(selected.key)
+            },
+        )
+    }
+}
+
+@Composable
+private fun VehicleRow(
+    vehicle: Vehicle,
+    isSelected: Boolean,
+    isConnected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.DirectionsCar,
+            contentDescription = null,
+            tint = if (isConnected) Accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(vehicle.name, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
+            Text(
+                vehicle.vin ?: "no VIN",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (isConnected) StatusPill("Now", Accent)
+    }
+}
+
+@Composable
+private fun HistoryCard(event: VehicleHistoryEvent) {
+    var expanded by remember { mutableStateOf(false) }
+    val (icon, colour) = presentation(event.type)
+
+    SectionCard(modifier = Modifier.clickable { expanded = !expanded }) {
+        Column {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(colour.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = colour, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, fontWeight = FontWeight.Medium)
+                    Text(
+                        "${event.type.label} · ${formatDateTime(event.timestamp)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (event.detail.isNotBlank()) {
+                AnimatedVisibility(expanded) {
+                    Text(
+                        event.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = if (event.type == EventType.CODES_CLEARED) FontFamily.Monospace
+                                     else FontFamily.Default,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp, start = 42.dp),
+                    )
+                }
+                if (!expanded) {
+                    Text(
+                        "Tap for detail",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 10.sp,
+                        color = colour,
+                        modifier = Modifier.padding(top = 6.dp, start = 42.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun presentation(type: EventType): Pair<ImageVector, androidx.compose.ui.graphics.Color> =
+    when (type) {
+        EventType.CONNECTED -> Icons.Filled.Link to Info
+        EventType.CODES_FOUND -> Icons.Filled.Warning to Danger
+        EventType.CODES_CLEARED -> Icons.Filled.DeleteSweep to WarningColour
+        EventType.ABNORMAL -> Icons.Filled.Bolt to WarningColour
+        EventType.TRIP -> Icons.Filled.Timeline to Accent
+        EventType.NOTE -> Icons.Filled.DirectionsCar to Info
+    }
+
+@Composable
+private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name this car") },
+        text = {
+            Column {
+                Text(
+                    "Whatever you'll recognise — \"the Golf\", \"Mum's car\".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true)
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(name) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DeleteDialog(
+    vehicle: Vehicle,
+    entryCount: Int,
+    size: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete ${vehicle.name}?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This removes the car and its entire history — $entryCount entries, $size.")
+                Text(
+                    "There's no undo, and the codes recorded here are the only copy: the car " +
+                        "itself forgot them when they were cleared. If you might want the record " +
+                        "later, save a diagnostic report from the Codes screen first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WarningColour,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = Danger),
+            ) { Text("Delete") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun formatDate(millis: Long): String =
+    SimpleDateFormat("d MMM yyyy", Locale.UK).format(Date(millis))
+
+private fun formatDateTime(millis: Long): String =
+    SimpleDateFormat("d MMM yyyy, HH:mm", Locale.UK).format(Date(millis))
