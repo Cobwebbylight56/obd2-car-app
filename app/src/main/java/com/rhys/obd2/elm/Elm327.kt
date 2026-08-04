@@ -216,10 +216,54 @@ class Elm327(
         onProgress("Detecting protocol")
         runCatching { command("ATSP0") }
 
-        // 0100 is the standard "is anyone there" request. Under ATSP0 this is what
-        // actually triggers the protocol search, so it gets a long timeout.
-        val probe = runCatching { command("0100", PROTOCOL_TIMEOUT_MS) }.getOrElse { "" }
-        val probeError = detectError(probe)
+        // 0100 is the standard "is anyone there" request. Under ATSP0 this is what actually
+        // triggers the protocol search, so it gets a long timeout.
+        //
+        // Retried rather than trusted once. The ELM327 documentation is explicit that the
+        // first request after a reset or a protocol change may fail while the search is
+        // still settling, and that repeating it is the correct response. A single attempt
+        // reported a perfectly good adapter as unable to reach the car.
+        var probe = ""
+        var probeError: ObdError? = null
+        var attempt = 0
+        while (attempt < AUTO_DETECT_ATTEMPTS) {
+            if (attempt > 0) onProgress("Detecting protocol (attempt ${attempt + 1})")
+            probe = runCatching { command("0100", PROTOCOL_TIMEOUT_MS) }.getOrElse { "" }
+            probeError = detectError(probe)
+            // A plain loop rather than `repeat`, because `return@repeat` continues to the
+            // next iteration instead of leaving — so a successful first probe would have
+            // been thrown away and replaced by a second, failing one.
+            if (respondedToProbe(probe, probeError)) break
+            attempt++
+        }
+
+        // Auto-detection failed. Walk the protocols by hand.
+        //
+        // ATSP0 is not the reliable mechanism it looks like. It searches well for CAN, which
+        // is why it works on anything built since roughly 2008, but the older protocols need
+        // a 5-baud initialisation sequence taking seconds per attempt and many clone chips
+        // abandon the search before reaching them — or claim to have searched and quietly
+        // didn't. On a pre-CAN car the result is an adapter that is plainly alive reporting
+        // that it cannot reach a car it is perfectly capable of reaching.
+        if (!respondedToProbe(probe, probeError)) {
+            for (candidate in PROTOCOL_WALK) {
+                onProgress("Trying ${candidate.label}")
+                // ATTP rather than ATSP: try it, and leave it selected only if it answers.
+                runCatching { command("ATTP${candidate.code}") }
+                probe = runCatching { command("0100", candidate.timeoutMs) }.getOrElse { "" }
+                probeError = detectError(probe)
+                if (respondedToProbe(probe, probeError)) {
+                    // Make the working protocol stick for the rest of the session, so no
+                    // later request re-runs the search.
+                    runCatching { command("ATSP${candidate.code}") }
+                    Log.i(TAG, "Protocol found by walking: ${candidate.label}")
+                    break
+                }
+            }
+            // Leave the chip on automatic if nothing answered, so a retry starts clean
+            // rather than pinned to whichever protocol happened to be tried last.
+            if (!respondedToProbe(probe, probeError)) runCatching { command("ATSP0") }
+        }
 
         protocolDescription = runCatching {
             command("ATDP").lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }
@@ -229,7 +273,7 @@ class Elm327(
             command("ATRV").lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }
         }.getOrNull()
 
-        return if (probeError == null && probe.replace(Regex("[^0-9A-Fa-f]"), "").contains("4100", ignoreCase = true)) {
+        return if (respondedToProbe(probe, probeError)) {
             InitResult(
                 success = true,
                 adapter = adapterIdentity,
@@ -244,10 +288,19 @@ class Elm327(
                 batteryVoltage = voltage,
                 message = when (probeError) {
                     ObdError.UNABLE_TO_CONNECT ->
-                        "The adapter is working but can't reach the car's computer. " +
-                            "Turn the ignition to position II (dashboard lights on) and try again."
+                        "The adapter is working, but no protocol reached the car's computer — " +
+                            "all nine were tried.\n\n" +
+                            "The usual cause is the ignition: turn the key to position II so the " +
+                            "dashboard lights come on. The engine doesn't need to be running, but " +
+                            "the OBD socket is dead with the key out.\n\n" +
+                            "If the ignition is on, check the adapter is pushed fully home — the " +
+                            "socket is often loose, and a partly seated plug powers the adapter " +
+                            "without connecting the data pins."
                     ObdError.NO_DATA ->
-                        "The car didn't answer. Turn the ignition on, or the engine may need to be running."
+                        "The adapter reached the car but the engine computer didn't answer.\n\n" +
+                            "On a diesel built before about 2004, this can mean the car predates " +
+                            "mandatory EOBD and genuinely has nothing to talk to. On a petrol car " +
+                            "it usually means the ignition is not fully on."
                     ObdError.BUS_ERROR ->
                         "Bus error while connecting. Unplug the adapter, wait ten seconds, and plug it back in."
                     else ->
@@ -348,6 +401,55 @@ class Elm327(
         const val RESET_TIMEOUT_MS = 10_000L
         const val PROTOCOL_TIMEOUT_MS = 20_000L
         const val SLOW_TIMEOUT_MS = 12_000L
+
+        /**
+         * How many times to ask under automatic detection before walking by hand.
+         *
+         * Two, because the ELM327 documentation says the first request after a reset or a
+         * protocol change can fail while the search settles, and repeating it is the
+         * documented fix — but a third attempt has never been observed to succeed where
+         * the second didn't, and each one costs twenty seconds.
+         */
+        const val AUTO_DETECT_ATTEMPTS = 2
+
+        /** One protocol the chip can be told to try, with a budget suited to its init. */
+        data class ProtocolCandidate(val code: String, val label: String, val timeoutMs: Long)
+
+        /**
+         * The manual search order, used only once automatic detection has given up.
+         *
+         * Ordered by what is actually likely at that point rather than by protocol number.
+         * ATSP0 finds CAN reliably — that is the case it is good at — so by the time this
+         * list is reached, CAN has effectively been ruled out and the older protocols are
+         * the probable answer. Within those, fast initialisation comes before 5-baud
+         * initialisation because it costs two seconds instead of twelve, and a wrong guess
+         * that fails quickly is cheaper than a right guess reached slowly.
+         *
+         * CAN is still tried afterwards. A clone chip that mishandled the automatic search
+         * may equally have mishandled CAN, and by then there is nothing left to lose.
+         */
+        val PROTOCOL_WALK = listOf(
+            ProtocolCandidate("5", "ISO 14230-4 KWP, fast init", 8_000L),
+            ProtocolCandidate("3", "ISO 9141-2", 12_000L),
+            ProtocolCandidate("4", "ISO 14230-4 KWP, 5-baud init", 12_000L),
+            ProtocolCandidate("6", "ISO 15765-4 CAN, 11-bit 500k", 6_000L),
+            ProtocolCandidate("7", "ISO 15765-4 CAN, 29-bit 500k", 6_000L),
+            ProtocolCandidate("1", "SAE J1850 PWM", 6_000L),
+            ProtocolCandidate("2", "SAE J1850 VPW", 6_000L),
+            ProtocolCandidate("8", "ISO 15765-4 CAN, 11-bit 250k", 6_000L),
+            ProtocolCandidate("9", "ISO 15765-4 CAN, 29-bit 250k", 6_000L),
+        )
+
+        /**
+         * Did the car answer the 0100 probe?
+         *
+         * A positive response to service 01 is 0x41, so the reply to `0100` begins `4100`.
+         * Checked on the stripped hex rather than the raw text because adapters differ on
+         * spacing, echo and line endings, and because a "SEARCHING..." notice can share the
+         * buffer with the real answer.
+         */
+        fun respondedToProbe(raw: String, error: ObdError?): Boolean =
+            error == null && raw.replace(Regex("[^0-9A-Fa-f]"), "").contains("4100", ignoreCase = true)
     }
 }
 
