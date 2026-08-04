@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rhys.obd2.ui.theme.Motion
 import com.rhys.obd2.ui.theme.NumericLarge
@@ -355,9 +356,48 @@ fun ExplainerCard(
     }
 }
 
-/** Key/value row used in the info screens. */
+/**
+ * Key/value row used in the info screens.
+ *
+ * Long values stack under their label rather than being squeezed into a right-hand column.
+ * Side by side, a VIN broke as `WVWZZZ1KZAW1234` / `56` — an identifier split across two
+ * lines mid-run, which is hard to read, hard to read *aloud* to a garage, and hard to
+ * check a digit of. Anything that long gets the full width of the card instead, on one
+ * line, where it stays a single token.
+ *
+ * The threshold is a character count rather than a measurement. It is approximate by
+ * nature, but it is predictable, and every value in this app is either short (a
+ * temperature, a count, a date) or clearly an identifier — there is nothing near the
+ * boundary for it to get wrong.
+ */
 @Composable
 fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
+    val stacked = value.length > 16
+
+    if (stacked) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp)
+                .semantics(mergeDescendants = true) { },
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(Space.xxs))
+            Text(
+                value,
+                style = com.rhys.obd2.ui.theme.NumericSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Visible,
+            )
+        }
+        return
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -378,7 +418,6 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
             style = com.rhys.obd2.ui.theme.NumericSmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End,
-            modifier = Modifier.weight(1.2f),
         )
     }
 }
@@ -478,11 +517,12 @@ fun RowIcon(
     tone: Tone,
     modifier: Modifier = Modifier,
     filled: Boolean = true,
+    size: Dp = 38.dp,
 ) {
     val c = tone.colors()
     Box(
         modifier
-            .size(38.dp)
+            .size(size)
             .clip(CircleShape)
             .background(if (filled) c.container else Color.Transparent),
         contentAlignment = Alignment.Center,
@@ -491,7 +531,7 @@ fun RowIcon(
             icon,
             contentDescription = null,
             tint = c.foreground,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(size * 0.53f),
         )
     }
 }
@@ -518,7 +558,10 @@ fun EmptyState(
             .padding(horizontal = Space.lg, vertical = Space.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        RowIcon(icon, tone)
+        // Larger than a list row's badge: this is the only thing on the screen, and at
+        // 38dp it read as an afterthought floating above the text rather than as the
+        // anchor for it.
+        RowIcon(icon, tone, size = 64.dp)
         Spacer(Modifier.height(Space.md))
         Text(
             title,
