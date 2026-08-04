@@ -34,8 +34,25 @@ import java.io.File
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w411dp-h2400dp-xhdpi")
 class DesignReviewTest {
+
+    /*
+     * The virtual device is specified rather than left to default, and both parts matter.
+     *
+     * Robolectric's default screen is 320x470dp at 1x — a phone from 2010. Rendering
+     * against it produced two separate lies. Everything was 91dp narrower than a real
+     * handset, so text wrapped and truncated in ways it never would on hardware; the first
+     * review off this harness turned up a "truncated gauge label" that was purely an
+     * artifact of the narrow screen. And the capture is bounded by the screen height, so
+     * any entry taller than 470dp was silently cut off — the status tone sheet lost its
+     * last swatch entirely, which is exactly the kind of omission a review must not have.
+     *
+     * 411dp is a common modern width (Pixel-class). The height is deliberately absurd so
+     * that nothing is ever clipped by it; the capture still sizes to the content. xhdpi
+     * doubles the pixel dimensions, which matters because these images get read at a
+     * glance and 1x text is too small to judge.
+     */
 
     @Test
     fun `render every gallery entry in both themes`() {
@@ -63,6 +80,31 @@ class DesignReviewTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `rendered images are not clipped by the virtual screen`() {
+        // A capture bounded by the screen produces a partial picture that still looks like
+        // a complete one, which is worse than no picture. If the tallest entry ever comes
+        // within reach of the virtual screen height, the review stops being trustworthy.
+        val screenHeightDp = 2400
+        val root = File("../design/screenshots")
+        val tallest = root.walkTopDown()
+            .filter { it.isFile && it.extension == "png" }
+            .maxOfOrNull { pngHeightPx(it) / 2 } ?: 0   // xhdpi, so px / 2 gives dp
+        check(tallest < screenHeightDp - 200) {
+            "The tallest render is ${tallest}dp against a ${screenHeightDp}dp screen. " +
+                "Raise the qualifier height before an entry gets cut off."
+        }
+    }
+
+    /** Reads height straight out of the PNG header — no image library needed. */
+    private fun pngHeightPx(file: File): Int {
+        val header = file.readBytes().copyOfRange(16, 24)
+        return ((header[4].toInt() and 0xFF) shl 24) or
+            ((header[5].toInt() and 0xFF) shl 16) or
+            ((header[6].toInt() and 0xFF) shl 8) or
+            (header[7].toInt() and 0xFF)
     }
 
     @Test
