@@ -106,6 +106,13 @@ class Elm327(
     private var headersOn = false
 
     /**
+     * Whether the negotiated protocol is CAN, which decides whether the "how many replies"
+     * optimisation is safe to use. See [obd].
+     */
+    var isCan: Boolean = true
+        private set
+
+    /**
      * Begins consuming the transport, and does not return until the subscription is
      * actually registered.
      *
@@ -268,6 +275,8 @@ class Elm327(
         protocolDescription = runCatching {
             command("ATDP").lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }
         }.getOrNull()
+        isCan = protocolDescription?.contains("CAN", ignoreCase = true) ?: true
+        Log.i(TAG, "Protocol: $protocolDescription (CAN: $isCan)")
 
         val voltage = runCatching {
             command("ATRV").lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }
@@ -347,7 +356,15 @@ class Elm327(
             if (pid != null) append("%02X".format(pid))
             // One hex digit only — anything wider would be parsed by the chip as part of
             // the request itself.
-            expectedResponses?.let { append("%X".format(it.coerceIn(1, 15))) }
+            //
+            // Only ever sent on CAN. On the older buses several control units answer the
+            // same standard request, and telling the chip to stop after the first leaves
+            // the rest of them still transmitting. Those bytes arrive moments later, sit
+            // in the buffer, and are read as the answer to whatever is asked next — so
+            // readings appear on the wrong gauge. The optimisation is worth roughly a
+            // halving of the sample rate on CAN, and it is worth nothing at all if the
+            // numbers are wrong.
+            if (isCan) expectedResponses?.let { append("%X".format(it.coerceIn(1, 15))) }
         }
 
         val raw = try {

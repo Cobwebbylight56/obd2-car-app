@@ -30,6 +30,9 @@ import com.rhys.obd2.data.UnitSystem
 import com.rhys.obd2.obd.PidRegistry
 import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.SectionCard
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun SettingsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
@@ -62,16 +65,25 @@ fun SettingsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { viewModel.settings.setUnits(system) }
-                                .padding(vertical = 6.dp),
+                                .selectable(
+                                    selected = units == system,
+                                    role = Role.RadioButton,
+                                    onClick = { viewModel.settings.setUnits(system) },
+                                )
+                                .heightIn(min = 48.dp)
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(
-                                selected = units == system,
-                                onClick = { viewModel.settings.setUnits(system) },
-                            )
+                            RadioButton(selected = units == system, onClick = null)
                             Spacer(Modifier.width(8.dp))
-                            Text(system.label)
+                            Column {
+                                Text(system.label, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    system.detail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                     Text(

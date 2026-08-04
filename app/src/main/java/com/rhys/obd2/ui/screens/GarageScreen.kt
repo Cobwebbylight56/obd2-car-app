@@ -83,6 +83,9 @@ fun GarageScreen(viewModel: ObdViewModel) {
 
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var clearingHistory by remember { mutableStateOf(false) }
+    var deletingEvent by remember { mutableStateOf<VehicleHistoryEvent?>(null) }
+    val revision by viewModel.historyRevision.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -130,7 +133,9 @@ fun GarageScreen(viewModel: ObdViewModel) {
         }
 
         val vehicle = selected ?: return@LazyColumn
-        val events = viewModel.historyFor(vehicle.key)
+        // Reading the revision here is what makes a deletion show up: the events come from
+        // a file, so nothing else would tell Compose the list has changed.
+        val events = run { revision; viewModel.historyFor(vehicle.key) }
 
         item {
             SectionCard(
@@ -168,6 +173,21 @@ fun GarageScreen(viewModel: ObdViewModel) {
                     InfoRow("First seen", formatDate(vehicle.firstSeen))
                     InfoRow("Last seen", formatDate(vehicle.lastSeen))
                     InfoRow("History", "${events.size} entries · ${viewModel.historySize(vehicle.key)}")
+                    if (events.isNotEmpty()) {
+                        TextButton(
+                            onClick = { clearingHistory = true },
+                            modifier = Modifier.align(Alignment.End),
+                        ) {
+                            Icon(
+                                Icons.Filled.DeleteSweep,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = Tone.DANGER.color(),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Clear all history", color = Tone.DANGER.color())
+                        }
+                    }
 
                     if (!vehicle.identifiedByVin) {
                         Spacer(Modifier.height(10.dp))
@@ -203,7 +223,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
         }
 
         for (event in events) {
-            item(key = "${event.timestamp}-${event.title}") { HistoryCard(event) }
+            item(key = "${event.timestamp}-${event.title}") { HistoryCard(event, onDelete = { deletingEvent = event }) }
         }
 
         item { Spacer(Modifier.height(32.dp)) }
@@ -217,6 +237,67 @@ fun GarageScreen(viewModel: ObdViewModel) {
                 renaming = false
                 viewModel.renameVehicle(selected.key, name)
             },
+        )
+    }
+
+    deletingEvent?.let { event ->
+        val key = selected?.key
+        AlertDialog(
+            onDismissRequest = { deletingEvent = null },
+            title = { Text("Delete this record?") },
+            text = {
+                Column {
+                    Text(event.title, fontWeight = FontWeight.Medium)
+                    Text(
+                        "${event.type.label} · ${formatDateTime(event.timestamp)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This removes the entry for good. If it was a fault code, the record " +
+                            "that it ever happened goes with it — the car forgot it the moment " +
+                            "the codes were cleared.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (key != null) viewModel.deleteHistoryEvent(key, event)
+                        deletingEvent = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Tone.DANGER.color()),
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deletingEvent = null }) { Text("Keep") } },
+        )
+    }
+
+    if (clearingHistory && selected != null) {
+        AlertDialog(
+            onDismissRequest = { clearingHistory = false },
+            title = { Text("Clear all history?") },
+            text = {
+                Text(
+                    "Deletes every recorded entry for ${selected.name} — fault codes, unusual " +
+                        "readings and trips — but keeps the car itself and its name.\n\n" +
+                        "This is the record the car cannot keep for you. Once it is gone there " +
+                        "is no way to tell a fault that has come back four times from one that " +
+                        "has just appeared.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clearingHistory = false
+                        viewModel.clearHistory(selected.key)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Tone.DANGER.color()),
+                ) { Text("Clear history") }
+            },
+            dismissButton = { TextButton(onClick = { clearingHistory = false }) { Text("Cancel") } },
         )
     }
 
@@ -276,7 +357,7 @@ private fun VehicleRow(
 }
 
 @Composable
-private fun HistoryCard(event: VehicleHistoryEvent) {
+private fun HistoryCard(event: VehicleHistoryEvent, onDelete: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val (icon, tone) = presentation(event.type)
 
@@ -306,7 +387,26 @@ private fun HistoryCard(event: VehicleHistoryEvent) {
                         modifier = Modifier.padding(top = 10.dp, start = 42.dp),
                     )
                 }
-                if (!expanded) {
+                if (expanded) {
+                    // Only on the expanded card. A delete control on every collapsed row
+                    // turns a history you are reading into a minefield of small red
+                    // targets, and this list is read far more often than it is pruned.
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp, start = 42.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onDelete) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Tone.DANGER.color(),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Delete this record", color = Tone.DANGER.color())
+                        }
+                    }
+                } else {
                     Text(
                         "Tap for detail",
                         style = MaterialTheme.typography.labelSmall,

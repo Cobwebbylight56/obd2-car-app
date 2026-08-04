@@ -278,6 +278,25 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     // Garage
     // -----------------------------------------------------------------------------
 
+    fun deleteHistoryEvent(key: String, event: VehicleHistoryEvent) {
+        repository.garage.deleteEvent(key, event)
+        historyRevision.value++
+    }
+
+    fun clearHistory(key: String) {
+        repository.garage.clearHistory(key)
+        historyRevision.value++
+    }
+
+    /**
+     * Bumped whenever the history changes on disk.
+     *
+     * The events are read from a file rather than held in a flow, so nothing would
+     * otherwise tell Compose that a deletion happened and the list would keep showing the
+     * entry until the screen was left and re-entered.
+     */
+    val historyRevision = MutableStateFlow(0)
+
     fun historyFor(key: String): List<VehicleHistoryEvent> = repository.garage.events(key)
 
     fun historySize(key: String): String {

@@ -171,6 +171,37 @@ class Garage(private val context: Context) {
         }.onFailure { Log.e(TAG, "Could not write history event", it) }
     }
 
+    /**
+     * Removes one entry from a car's history.
+     *
+     * Rewrites the log without it rather than marking it deleted, so "delete" means the
+     * bytes are gone — which is the whole point of being able to delete a car when it's
+     * sold, applied at a smaller scale.
+     *
+     * Matched on timestamp and title rather than on an identifier, because the log has no
+     * identifiers: it is an append-only text file, and giving every line a synthetic id
+     * would break every file already written. Two entries identical in both fields are
+     * indistinguishable to a reader as well, so removing either satisfies the request.
+     */
+    fun deleteEvent(key: String, event: VehicleHistoryEvent): Boolean {
+        val file = File(directory(key), EVENTS_FILE)
+        if (!file.exists()) return false
+        return runCatching {
+            val kept = file.readLines().filterNot { line ->
+                decode(line)?.let {
+                    it.timestamp == event.timestamp && it.title == event.title
+                } ?: false
+            }
+            file.writeText(kept.joinToString("\n").let { if (it.isEmpty()) "" else it + "\n" })
+            true
+        }.onFailure { Log.e(TAG, "Could not delete history event", it) }.getOrDefault(false)
+    }
+
+    /** Empties a car's history but keeps the car itself, its name and its identity. */
+    fun clearHistory(key: String): Boolean = runCatching {
+        File(directory(key), EVENTS_FILE).takeIf { it.exists() }?.delete() ?: true
+    }.onFailure { Log.e(TAG, "Could not clear history", it) }.getOrDefault(false)
+
     /** Remembers the code set so a repeated read doesn't log the same thing again. */
     fun updateLastCodes(key: String, codes: Set<String>) {
         val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return

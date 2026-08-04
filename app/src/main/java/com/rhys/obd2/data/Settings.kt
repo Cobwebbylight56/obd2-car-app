@@ -89,9 +89,21 @@ class Settings(context: Context) {
     }
 }
 
-enum class UnitSystem(val label: String) {
-    METRIC("Metric (km/h, °C, kPa)"),
-    IMPERIAL("Imperial (mph, °F, psi)"),
+enum class UnitSystem(val label: String, val detail: String) {
+    METRIC("Metric", "km/h, °C, kPa, litres"),
+
+    /**
+     * What Britain actually uses, which is neither of the other two.
+     *
+     * Road speed and distance are imperial because the road signs are, but everything
+     * under the bonnet is metric — a UK garage quotes coolant in Celsius and boost in bar
+     * or kPa, and no British driver thinks in Fahrenheit. Offering only Metric and
+     * Imperial forces a choice where both options are wrong: metric gives you km/h you
+     * can't compare to a speedometer, imperial gives you Fahrenheit nobody uses.
+     */
+    UK("UK", "mph and miles, °C, kPa"),
+
+    IMPERIAL("Imperial (US)", "mph, °F, psi"),
 }
 
 /**
@@ -107,6 +119,14 @@ object Units {
 
     fun convert(value: Double, unit: String, system: UnitSystem): Converted {
         if (system == UnitSystem.METRIC) return Converted(value, unit)
+
+        // The UK converts distance and speed and leaves everything else alone.
+        if (system == UnitSystem.UK) return when (unit) {
+            "km/h" -> Converted(value * 0.621371, "mph")
+            "km" -> Converted(value * 0.621371, "miles")
+            else -> Converted(value, unit)
+        }
+
         return when (unit) {
             "km/h" -> Converted(value * 0.621371, "mph")
             "°C" -> Converted(value * 9.0 / 5.0 + 32.0, "°F")
@@ -127,7 +147,10 @@ object Units {
      */
     fun format(value: Double, unit: String): String {
         val decimals = when {
+            // Speed and revs are whole numbers on every dashboard ever made. Showing
+            // "0.00 mph" reads as a malfunctioning instrument rather than a stationary car.
             unit == "rpm" || unit == "km" || unit == "miles" -> 0
+            unit == "km/h" || unit == "mph" -> 0
             unit == "λ" -> 3
             kotlin.math.abs(value) >= 1000 -> 0
             kotlin.math.abs(value) >= 100 -> 1

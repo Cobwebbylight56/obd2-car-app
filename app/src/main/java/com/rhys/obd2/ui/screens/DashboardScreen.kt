@@ -286,10 +286,12 @@ private fun TripSummary(stats: com.rhys.obd2.data.TripStats, units: UnitSystem) 
             Metric("Distance", "${Units.format(distance.value, distance.unit)} ${distance.unit}")
             Metric("Top speed", "${Units.format(maxSpeed.value, maxSpeed.unit)} ${maxSpeed.unit}")
             stats.economyL100km?.let {
-                val economy = if (units == UnitSystem.IMPERIAL) {
-                    "%.1f mpg".format(282.481 / it)
-                } else {
-                    "%.1f L/100km".format(it)
+                // 282.481 is the imperial-gallon constant; the US gallon is 235.215. A UK
+                // driver reads imperial mpg, so UK and IMPERIAL are not the same number.
+                val economy = when (units) {
+                    UnitSystem.UK -> "%.1f mpg".format(282.481 / it)
+                    UnitSystem.IMPERIAL -> "%.1f mpg".format(235.215 / it)
+                    UnitSystem.METRIC -> "%.1f L/100km".format(it)
                 }
                 Metric("Economy", economy)
             }
