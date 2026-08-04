@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 
 /**
  * Bridges the repository to Compose.
@@ -109,14 +110,35 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connect(device: AdapterDevice) {
-        stopScan()
-        viewModelScope.launch {
+        connectJob?.cancel()
+        connectJob = viewModelScope.launch {
+            // Wait for the scan to actually stop, not just to be told to.
+            //
+            // stopScan() cancels the collecting coroutine, but the BLE scanner is only
+            // released in that flow's awaitClose, which runs asynchronously afterwards.
+            // Starting an RFCOMM connect while the radio is still scanning is a well-known
+            // way to make the connect fail or hang on a lot of Bluetooth stacks, and it
+            // was a race the app lost more often than not.
+            val running = scanJob
+            _scanning.value = false
+            scanJob = null
+            running?.cancelAndJoin()
+
             repository.connect(device)
             if (repository.connectionState.value is ConnectionState.Connected) {
                 startDashboardPolling()
             }
         }
     }
+
+    /** Abandons an in-progress connection attempt. */
+    fun cancelConnect() {
+        connectJob?.cancel()
+        connectJob = null
+        repository.disconnect()
+    }
+
+    private var connectJob: kotlinx.coroutines.Job? = null
 
     /**
      * Connects to the previously used adapter, at most once per app session.

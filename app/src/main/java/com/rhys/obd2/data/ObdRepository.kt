@@ -36,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicInteger
 
 sealed interface ConnectionState {
@@ -191,7 +193,9 @@ class ObdRepository(
 
         val newTransport = when (device.kind) {
             AdapterKind.BLE -> BleTransport(context, device)
-            AdapterKind.CLASSIC_BLUETOOTH -> ClassicBtTransport(context, device)
+            AdapterKind.CLASSIC_BLUETOOTH -> ClassicBtTransport(context, device).apply {
+                onProgress = { step -> _connectionState.value = ConnectionState.Connecting(step) }
+            }
             AdapterKind.WIFI -> {
                 val host = device.address.substringBefore(':', WifiTransport.DEFAULT_HOST)
                 val port = device.address.substringAfter(':', "").toIntOrNull() ?: WifiTransport.DEFAULT_PORT
@@ -200,12 +204,26 @@ class ObdRepository(
             AdapterKind.DEMO -> DemoTransport()
         }
 
+        // A backstop over the whole opening phase. Each transport bounds its own attempts,
+        // but a stall anywhere in here used to leave the UI on "Opening" with no timeout and
+        // no way back, which is indistinguishable from the app having crashed.
         try {
-            newTransport.connect()
+            withTimeout(OPEN_TIMEOUT_MS) { newTransport.connect() }
+        } catch (e: TimeoutCancellationException) {
+            runCatching { newTransport.close() }
+            _connectionState.value = ConnectionState.Failed(
+                "${device.name} didn't respond within ${OPEN_TIMEOUT_MS / 1000} seconds.\n\n" +
+                    "Check the adapter is plugged in and its light is on — the OBD socket " +
+                    "has no power until the ignition is at position II.",
+                device.name,
+            )
+            return
         } catch (e: ObdConnectionException) {
+            runCatching { newTransport.close() }
             _connectionState.value = ConnectionState.Failed(e.message ?: "Connection failed", device.name)
             return
         } catch (e: Exception) {
+            runCatching { newTransport.close() }
             _connectionState.value = ConnectionState.Failed(
                 e.message ?: "Unexpected error opening ${device.name}", device.name,
             )
@@ -807,6 +825,15 @@ class ObdRepository(
         private const val MAX_PID_FAILURES = 3
         private const val POLL_YIELD_MS = 50L
         private const val MAX_MONITOR_IDS = 24
+
+        /**
+         * Backstop for opening the physical link, across every transport.
+         *
+         * Classic Bluetooth bounds its three attempts at 10 + 8 + 6 seconds plus settling,
+         * so this sits above that total: it exists to catch a stall the transport didn't
+         * anticipate, not to pre-empt the transport's own, more specific, diagnosis.
+         */
+        private const val OPEN_TIMEOUT_MS = 30_000L
 
         /**
          * The PIDs worth capturing from a freeze frame. Reading all of them would take

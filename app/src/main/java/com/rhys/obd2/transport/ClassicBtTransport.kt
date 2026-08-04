@@ -14,6 +14,8 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.SharedFlow
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 /**
@@ -55,6 +58,9 @@ class ClassicBtTransport(
     private var readerScope: CoroutineScope? = null
     private var readerJob: Job? = null
 
+    /** Reports which attempt is in progress, so a slow connect doesn't look like a hang. */
+    var onProgress: (String) -> Unit = {}
+
     override suspend fun connect() = withContext(Dispatchers.IO) {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
             ?: throw ObdConnectionException("This device has no Bluetooth hardware")
@@ -85,43 +91,107 @@ class ClassicBtTransport(
     /**
      * The well-known SPP connect first, then the reflection-based fallback on channel 1.
      * Plenty of cheap clones advertise SPP but only accept the insecure/reflective path.
+     *
+     * Every attempt is bounded. `BluetoothSocket.connect()` is a blocking call with no
+     * timeout of its own, and against a device that is paired but not actually there — the
+     * dongle unplugged, or the ignition off, which is the common case — it can block until
+     * the stack gives up, if it ever does. Three of those in a row is why the app could sit
+     * on "Opening" indefinitely with nothing to show for it.
+     *
+     * The timeout has to be enforced by closing the socket from another thread. `connect()`
+     * ignores interruption and ignores coroutine cancellation; closing the socket underneath
+     * it is the only thing that makes it return.
      */
-    private fun openSocket(remote: BluetoothDevice): BluetoothSocket {
-        val attempts = listOf<Pair<String, () -> BluetoothSocket>>(
-            "secure SPP" to { remote.createRfcommSocketToServiceRecord(SPP_UUID) },
-            "insecure SPP" to { remote.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
-            "channel 1 fallback" to {
+    private suspend fun openSocket(remote: BluetoothDevice): BluetoothSocket {
+        val attempts = listOf<Triple<String, Long, () -> BluetoothSocket>>(
+            Triple("secure SPP", 10_000L) { remote.createRfcommSocketToServiceRecord(SPP_UUID) },
+            Triple("insecure SPP", 8_000L) { remote.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
+            Triple("channel 1 fallback", 6_000L) {
                 val method = remote.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
                 method.invoke(remote, 1) as BluetoothSocket
             },
         )
 
         var lastError: Exception? = null
-        for ((label, open) in attempts) {
+        var timedOut = false
+
+        // Deliberately not a `finally` for the cleanup. A successful attempt returns out of
+        // this loop, and a `finally` would run on the way out and close the socket that was
+        // just opened — so the failed sockets are closed in the catch blocks instead.
+        attempts.forEachIndexed { index, (label, timeoutMs, open) ->
+            onProgress("Connecting to ${device.name} (${index + 1} of ${attempts.size})")
             var sock: BluetoothSocket? = null
             try {
                 sock = open()
-                sock.connect()
+                connectWithin(sock, timeoutMs)
                 Log.i(TAG, "Connected to ${device.name} via $label")
                 // Cheap clones are not ready the instant the socket opens; commands sent
                 // immediately are answered with garbage or not at all. A short settle is
                 // far cheaper than the ten-second ATZ timeout it otherwise costs.
-                Thread.sleep(SETTLE_MS)
+                delay(SETTLE_MS)
                 return sock
+            } catch (e: SocketTimeout) {
+                Log.w(TAG, "$label timed out after ${timeoutMs}ms")
+                lastError = e
+                timedOut = true
+                // A half-open RFCOMM socket left behind makes the next connect fail too on
+                // most Android stacks, which would defeat the very fallbacks below it.
+                runCatching { sock?.close() }
             } catch (e: Exception) {
                 Log.w(TAG, "$label failed: ${e.message}")
                 lastError = e
-                // Closing the failed socket matters more than it looks. A half-open
-                // RFCOMM socket left behind makes the next connect fail too on most
-                // Android stacks, which would defeat the very fallbacks below it.
                 runCatching { sock?.close() }
             }
         }
-        throw ObdConnectionException(
-            "Could not open a Bluetooth connection to ${device.name}. " +
-                "Make sure it is paired in Android's Bluetooth settings first.",
-            lastError,
-        )
+
+        throw ObdConnectionException(diagnose(timedOut), lastError)
+    }
+
+    /**
+     * Runs the blocking connect with a hard deadline, closing the socket to break it out.
+     */
+    private suspend fun connectWithin(sock: BluetoothSocket, timeoutMs: Long) {
+        coroutineScope {
+            val watchdog = launch(Dispatchers.IO) {
+                delay(timeoutMs)
+                // The only lever that works. connect() is not interruptible.
+                runCatching { sock.close() }
+            }
+            try {
+                runInterruptible(Dispatchers.IO) { sock.connect() }
+            } catch (e: IOException) {
+                // A close from the watchdog surfaces here as a generic IO failure, so the
+                // watchdog's own state is what distinguishes a timeout from a refusal.
+                if (!watchdog.isActive) throw SocketTimeout(timeoutMs) else throw e
+            } finally {
+                watchdog.cancel()
+            }
+        }
+    }
+
+    private class SocketTimeout(val afterMs: Long) : IOException("Connect timed out after ${afterMs}ms")
+
+    /**
+     * Says what to actually do about it.
+     *
+     * A timeout and a refusal mean different things and have different fixes, and "could
+     * not connect" covers both uselessly. Timing out on a paired device almost always means
+     * the dongle has no power — which on most cars means the ignition is not on, since the
+     * OBD socket is dead otherwise.
+     */
+    private fun diagnose(timedOut: Boolean): String = if (timedOut) {
+        "${device.name} is paired but didn't answer.\n\n" +
+            "The usual cause is that the adapter has no power: the OBD socket is dead " +
+            "until the ignition is on. Turn the key to position II so the dashboard " +
+            "lights come on, check the adapter's own light is lit, and try again.\n\n" +
+            "If it is lit, switch Bluetooth off and on — a stuck pairing on the phone " +
+            "side clears that way."
+    } else {
+        "${device.name} refused the connection.\n\n" +
+            "This usually means it is already connected to something else — another " +
+            "phone, or a scanner app left running in the background. Close any other " +
+            "OBD app, or unpair and re-pair the adapter in Android's Bluetooth settings " +
+            "(the PIN is almost always 1234 or 0000)."
     }
 
     private suspend fun pump() {

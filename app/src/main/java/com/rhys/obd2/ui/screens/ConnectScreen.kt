@@ -336,10 +336,19 @@ private fun ConnectionStatusCard(
 
         is ConnectionState.Connecting -> {
             SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text(connection.step, style = MaterialTheme.typography.bodyMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(connection.step, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    // Connecting to a classic dongle can legitimately take twenty seconds
+                    // across its fallbacks. Without a way out, a slow attempt and a hung
+                    // one look identical, and the only recourse was force-quitting.
+                    OutlinedButton(
+                        onClick = { viewModel.cancelConnect() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Cancel") }
                 }
             }
         }
