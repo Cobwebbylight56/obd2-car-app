@@ -61,6 +61,13 @@ Requires JDK 17 and the Android SDK (API 35). Minimum supported phone is Android
 **Bluetooth LE adapters** (Vgate iCar Pro, OBDLink CX, LELink, most modern ones) just
 appear in the scan list — no pairing needed.
 
+The list shows adapters and devices you've paired, not everything the radio can hear. A
+BLE scan in a car park picks up beacons, other people's earbuds and televisions by the
+dozen, nearly all advertising no name at all — which is itself the giveaway, since an
+adapter's whole job is to be findable and they all name themselves. Anything filtered out
+is still one tap away at the bottom of the list, because a few unbranded dongles advertise
+nothing recognisable and hiding those outright would make them look unsupported.
+
 **Classic Bluetooth adapters** — anything sold as "for Android and Windows only" is one of
 these, because iOS can't use Bluetooth SPP without MFi certification, so excluding iPhone
 is the giveaway. They must be paired in Android's own Bluetooth settings before the app
