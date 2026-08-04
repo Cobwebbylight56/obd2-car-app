@@ -62,10 +62,33 @@ enum class AdapterKind {
  * A dongle we could connect to. [address] is a MAC for Bluetooth and a "host:port"
  * string for Wi-Fi adapters.
  */
+/**
+ * How likely a discovered device is to be the thing you want to connect to.
+ *
+ * A BLE scan in any populated place hears dozens of devices — beacons in shops, other
+ * people's earbuds, televisions, tyre pressure sensors — and almost all of them advertise
+ * no name and a randomised address. Showing them all buries the one adapter you're looking
+ * for, so the list is partitioned rather than merely sorted.
+ */
+enum class DeviceRelevance {
+    /** The name or an advertised service UUID says OBD adapter. */
+    LIKELY,
+
+    /** Paired in Android's settings, so the owner chose it deliberately at some point. */
+    PAIRED,
+
+    /** Everything else the radio can hear. Hidden unless asked for. */
+    OTHER;
+
+    /** Declared best-first, so the more interesting of two classifications is the lower. */
+    fun or(other: DeviceRelevance): DeviceRelevance = if (ordinal <= other.ordinal) this else other
+}
+
 data class AdapterDevice(
     val name: String,
     val address: String,
     val kind: AdapterKind,
     val rssi: Int? = null,
     val bonded: Boolean = false,
+    val relevance: DeviceRelevance = DeviceRelevance.OTHER,
 )

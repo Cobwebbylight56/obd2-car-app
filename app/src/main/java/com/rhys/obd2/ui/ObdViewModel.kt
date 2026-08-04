@@ -12,6 +12,7 @@ import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.obd.PidRegistry
 import com.rhys.obd2.transport.AdapterDevice
 import com.rhys.obd2.transport.AdapterKind
+import com.rhys.obd2.transport.DeviceScanner
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,7 +80,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
                     // one entry per address so a dual-mode dongle isn't listed twice.
                     val bonded = app.scanner.bondedDevices()
                         .filter { paired -> devices.none { it.address == paired.address } }
-                    _scanResults.value = devices + bonded
+                    _scanResults.value = DeviceScanner.order(devices + bonded)
                 }
         }
     }
@@ -96,9 +97,9 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshPairedDevices() {
         val paired = app.scanner.bondedDevices()
         val existing = _scanResults.value
-        _scanResults.value = existing + paired.filter { new ->
-            existing.none { it.address == new.address }
-        }
+        _scanResults.value = DeviceScanner.order(
+            existing + paired.filter { new -> existing.none { it.address == new.address } }
+        )
     }
 
     fun stopScan() {

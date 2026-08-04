@@ -51,7 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.rhys.obd2.data.ConnectionState
-import com.rhys.obd2.transport.DeviceScanner
+import com.rhys.obd2.transport.AdapterDevice
+import com.rhys.obd2.transport.DeviceRelevance
 import com.rhys.obd2.transport.WifiTransport
 import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
@@ -72,7 +73,20 @@ fun ConnectScreen(
     val devices by viewModel.scanResults.collectAsState()
     val scanning by viewModel.scanning.collectAsState()
     var showWifiDialog by remember { mutableStateOf(false) }
+    var showAllDevices by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // A BLE scan anywhere near other people hears dozens of beacons, earbuds and
+    // televisions, none of which can possibly be an OBD adapter. Only adapters and things
+    // the owner has actually paired are shown; the rest stay one tap away rather than
+    // being discarded, because an unbranded dongle that advertises nothing recognisable
+    // would otherwise be unreachable with no clue as to why.
+    val candidates = remember(devices) {
+        devices.filter { it.relevance != DeviceRelevance.OTHER }
+    }
+    val otherDevices = remember(devices) {
+        devices.filter { it.relevance == DeviceRelevance.OTHER }
+    }
 
     val autoConnect by viewModel.settings.autoConnect.collectAsState()
 
@@ -171,35 +185,74 @@ fun ConnectScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (devices.isEmpty()) {
-                    Text(
-                        if (scanning) {
-                            "Looking for adapters. Make sure the dongle is plugged into the OBD port " +
-                                "and the ignition is on — most have no power otherwise.\n\n" +
-                                "If yours is a classic Bluetooth dongle — the sort sold as \"Android " +
-                                "and Windows only\" — it will not appear here until it has been paired " +
-                                "in Android's Bluetooth settings. Use the button below, pair it (the " +
-                                "PIN is almost always 1234 or 0000), then come back."
-                        } else {
-                            "Nothing found. Check the adapter is plugged in and Bluetooth is on. " +
-                                "Classic Bluetooth dongles must be paired in Android's settings first."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        devices.forEach { device ->
+                        if (candidates.isEmpty()) {
+                            Text(
+                                if (scanning) {
+                                    "Looking for adapters. Make sure the dongle is plugged into the OBD " +
+                                        "port and the ignition is on — most have no power otherwise.\n\n" +
+                                        "If yours is a classic Bluetooth dongle — the sort sold as " +
+                                        "\"Android and Windows only\" — it will not appear here until it " +
+                                        "has been paired in Android's Bluetooth settings. Use the button " +
+                                        "below, pair it (the PIN is almost always 1234 or 0000), then " +
+                                        "come back."
+                                } else {
+                                    "Nothing found. Check the adapter is plugged in and Bluetooth is on. " +
+                                        "Classic Bluetooth dongles must be paired in Android's settings first."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        candidates.forEach { device ->
                             DeviceRow(
                                 name = device.name,
-                                subtitle = buildString {
-                                    append(device.kind.label)
-                                    device.rssi?.let { append(" · ${signalLabel(it)}") }
-                                    if (device.bonded) append(" · paired")
-                                },
-                                highlight = DeviceScanner.looksLikeObdAdapter(device.name),
+                                subtitle = deviceSubtitle(device),
+                                highlight = device.relevance == DeviceRelevance.LIKELY,
                                 onClick = { viewModel.connect(device) },
                             )
+                        }
+
+                        if (otherDevices.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = if (showAllDevices) {
+                                    "Hide the other ${otherDevices.size} Bluetooth devices"
+                                } else {
+                                    "${otherDevices.size} other Bluetooth device" +
+                                        (if (otherDevices.size == 1) "" else "s") +
+                                        " nearby — show anyway"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Accent,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showAllDevices = !showAllDevices }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                            )
+
+                            if (showAllDevices) {
+                                Text(
+                                    "These are everything else your phone can hear — beacons in shops, " +
+                                        "other people's headphones, televisions. An OBD adapter almost " +
+                                        "always names itself, so anything listed as unnamed is very " +
+                                        "unlikely to be one. Shown in case yours is unusual.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                                otherDevices.forEach { device ->
+                                    DeviceRow(
+                                        name = device.name,
+                                        subtitle = deviceSubtitle(device),
+                                        highlight = false,
+                                        onClick = { viewModel.connect(device) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -420,6 +473,12 @@ private fun WifiDialog(onDismiss: () -> Unit, onConnect: (String, Int) -> Unit) 
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+private fun deviceSubtitle(device: AdapterDevice): String = buildString {
+    append(device.kind.label)
+    device.rssi?.let { append(" · ${signalLabel(it)}") }
+    if (device.bonded) append(" · paired")
 }
 
 /** Turns RSSI into something meaningful. dBm means nothing to most people. */

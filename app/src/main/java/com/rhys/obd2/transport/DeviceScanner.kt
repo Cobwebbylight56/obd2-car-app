@@ -10,6 +10,7 @@ import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import java.util.UUID
 
 /**
  * Finds candidate adapters.
@@ -35,21 +36,26 @@ class DeviceScanner(private val context: Context) {
         val adapter = manager()?.adapter ?: return emptyList()
         return runCatching {
             adapter.bondedDevices.orEmpty().map { device ->
+                val name = device.name
                 AdapterDevice(
-                    name = device.name ?: "Unnamed device",
+                    name = name ?: "Unnamed device",
                     address = device.address,
                     kind = AdapterKind.CLASSIC_BLUETOOTH,
                     bonded = true,
+                    relevance = classify(name, emptyList(), bonded = true),
                 )
-            }.sortedByDescending { looksLikeObdAdapter(it.name) }
+            }.let { order(it) }
         }.getOrDefault(emptyList())
     }
 
     /**
      * Live BLE scan. Emits the accumulated result list whenever it changes.
      *
-     * Deliberately unfiltered: many adapters advertise no service UUIDs at all, so
-     * filtering on the known ones would hide working hardware. Ranking happens instead.
+     * The scan itself stays deliberately unfiltered at the radio level: many working
+     * adapters advertise no service UUIDs at all, so a hardware scan filter would make
+     * them permanently invisible with no way for the user to discover why. Each result is
+     * instead classified into [DeviceRelevance] and the UI decides what to show, which
+     * keeps the noise out of the way while leaving it reachable.
      */
     fun scanBle(): Flow<List<AdapterDevice>> = callbackFlow {
         val scanner = manager()?.adapter?.bluetoothLeScanner
@@ -64,28 +70,40 @@ class DeviceScanner(private val context: Context) {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device ?: return
                 val advertisedName = result.scanRecord?.deviceName
-                val name = advertisedName
                     ?: runCatching { device.name }.getOrNull()
-                    ?: "Unnamed (${device.address.takeLast(5)})"
+                val name = advertisedName ?: "Unnamed (${device.address.takeLast(5)})"
+                val bonded = runCatching {
+                    device.bondState == android.bluetooth.BluetoothDevice.BOND_BONDED
+                }.getOrDefault(false)
+
+                // Some dongles advertise a recognisable GATT service but no name at all,
+                // which is the one case where the UUIDs are the only thing to go on.
+                val services = result.scanRecord?.serviceUuids.orEmpty().map { it.uuid }
 
                 val entry = AdapterDevice(
                     name = name,
                     address = device.address,
                     kind = AdapterKind.BLE,
                     rssi = result.rssi,
-                    bonded = runCatching { device.bondState == android.bluetooth.BluetoothDevice.BOND_BONDED }
-                        .getOrDefault(false),
+                    bonded = bonded,
+                    relevance = classify(advertisedName, services, bonded),
                 )
                 val previous = found[device.address]
-                // Keep the better-known name if a later advert drops it.
-                found[device.address] = if (previous != null && previous.name.startsWith("Unnamed")) {
+                // Keep the better-known name if a later advert drops it. Adverts from one
+                // device vary between packets, so relevance only ever improves — a dongle
+                // that identified itself once doesn't stop being a dongle when the next
+                // packet omits the name.
+                val merged = if (previous != null && previous.name.startsWith("Unnamed")) {
                     entry
                 } else if (previous != null && entry.name.startsWith("Unnamed")) {
                     previous.copy(rssi = result.rssi)
                 } else {
                     entry
                 }
-                trySend(rank(found.values.toList()))
+                found[device.address] = if (previous == null) merged else {
+                    merged.copy(relevance = merged.relevance.or(previous.relevance))
+                }
+                trySend(order(found.values.toList()))
             }
 
             override fun onBatchScanResults(results: MutableList<ScanResult>) {
@@ -113,13 +131,6 @@ class DeviceScanner(private val context: Context) {
         awaitClose { runCatching { scanner.stopScan(callback) } }
     }
 
-    /** Likely adapters float to the top; strong signal breaks ties. */
-    private fun rank(devices: List<AdapterDevice>): List<AdapterDevice> =
-        devices.sortedWith(
-            compareByDescending<AdapterDevice> { looksLikeObdAdapter(it.name) }
-                .thenByDescending { it.rssi ?: Int.MIN_VALUE }
-        )
-
     private fun scanFailureMessage(code: Int): String = when (code) {
         ScanCallback.SCAN_FAILED_ALREADY_STARTED -> "A scan is already running"
         ScanCallback.SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "Android refused the scan registration"
@@ -132,14 +143,49 @@ class DeviceScanner(private val context: Context) {
         private const val TAG = "DeviceScanner"
 
         private val HINTS = listOf(
-            "obd", "elm", "vgate", "icar", "vlink", "obdlink", "konnwei", "veepeak",
-            "lelink", "carista", "bafx", "viecar", "kiwi", "scan", "v-link", "obdii",
+            "obd", "elm", "elm327", "vgate", "icar", "vlink", "v-link", "vlinker",
+            "obdlink", "obdii", "obd2", "konnwei", "veepeak", "lelink", "carista",
+            "bafx", "viecar", "kiwi", "friencity", "ancel", "autel", "topdon",
+            "thinkdiag", "foxwell", "launch", "nexpeak", "panlong", "scantool",
+            "torque", "carly", "kobra", "wgw", "diagnostic", "scanner",
         )
 
-        /** Name-based heuristic for ordering the scan list. Never used to exclude. */
+        /** Name-based heuristic. Only ever promotes a device, never excludes one. */
         fun looksLikeObdAdapter(name: String): Boolean {
             val lower = name.lowercase()
             return HINTS.any { lower.contains(it) }
         }
+
+        /**
+         * Decides whether a discovered device is worth showing by default.
+         *
+         * [name] must be the *advertised* name, not a placeholder built from the address:
+         * having no name at all is the strongest single signal that something is not an
+         * OBD adapter. Adapters exist to be found and every one of them names itself; the
+         * anonymous devices filling up a scan are beacons and other people's electronics
+         * advertising under a rotating address.
+         */
+        fun classify(
+            name: String?,
+            serviceUuids: List<UUID>,
+            bonded: Boolean,
+        ): DeviceRelevance = when {
+            name != null && looksLikeObdAdapter(name) -> DeviceRelevance.LIKELY
+            serviceUuids.any { it in BleTransport.SERVICE_HINTS } -> DeviceRelevance.LIKELY
+            bonded -> DeviceRelevance.PAIRED
+            else -> DeviceRelevance.OTHER
+        }
+
+        /**
+         * Shared ordering for the scan list: most relevant first, strongest signal within
+         * a group. Lives here so the merged BLE-plus-paired list sorts the same way the
+         * scanner's own output does.
+         */
+        fun order(devices: List<AdapterDevice>): List<AdapterDevice> =
+            devices.sortedWith(
+                compareBy<AdapterDevice> { it.relevance.ordinal }
+                    .thenByDescending { it.rssi ?: Int.MIN_VALUE }
+                    .thenBy { it.name }
+            )
     }
 }
