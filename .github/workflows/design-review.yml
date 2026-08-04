@@ -1,0 +1,109 @@
+name: Design review
+
+# Renders the component gallery to PNGs and commits them.
+#
+# The point is to make visual change reviewable. Without this, a change to a colour, a
+# spacing token or a component's layout arrives in review as a diff of Kotlin that somebody
+# has to picture in their head — which is exactly how a light theme with 1.6:1 contrast
+# survived for months. With it, the same change arrives as a set of before/after images.
+#
+# Runs separately from the APK build on purpose: a problem in the rendering toolchain must
+# never be able to stop a working build of the app from being produced.
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'app/src/main/java/com/rhys/obd2/ui/**'
+      - 'app/src/test/java/com/rhys/obd2/design/**'
+      - 'app/build.gradle.kts'
+      - 'gradle/libs.versions.toml'
+      - '.github/workflows/design-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: design-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A token that can push, so the rendered images can be committed back.
+          persist-credentials: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Render the gallery
+        id: render
+        run: |
+          set -o pipefail
+          ./gradlew :app:testDebugUnitTest \
+            --tests 'com.rhys.obd2.design.*' \
+            -Proborazzi.test.record=true 2>&1 | tee render.log || echo "failed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Show what went wrong
+        if: steps.render.outputs.failed == 'true'
+        run: |
+          echo "::group::Compiler and test failures"
+          grep -E "^(e|w): |FAILED|expected:|but was:|Caused by" render.log | head -80 || true
+          echo "::endgroup::"
+          echo "::group::Test reports"
+          find app/build/reports/tests -name '*.html' -print 2>/dev/null | head || true
+          find app/build -name '*.txt' -path '*test-results*' -exec tail -40 {} + 2>/dev/null | head -120 || true
+          echo "::endgroup::"
+          exit 1
+
+      # Roborazzi's output location depends on how the capture was invoked, so collect the
+      # images by searching rather than by assuming a path.
+      - name: Collect rendered images
+        run: |
+          mkdir -p design/screenshots
+          found=$(find . -path ./design -prune -o -name '*.png' -newer render.log -print 2>/dev/null | wc -l)
+          echo "Rendered PNGs found outside design/: $found"
+          if [ -d app/build/outputs/roborazzi ]; then
+            echo "Copying from app/build/outputs/roborazzi"
+            cp -r app/build/outputs/roborazzi/. design/screenshots/ 2>/dev/null || true
+          fi
+          echo "--- design/screenshots contents ---"
+          find design/screenshots -name '*.png' | sort | head -60
+          echo "--- total: $(find design/screenshots -name '*.png' | wc -l) images ---"
+
+      - name: Upload images as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-screenshots
+          path: design/screenshots
+          if-no-files-found: warn
+
+      - name: Commit the images
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add design/screenshots
+          if git diff --cached --quiet; then
+            echo "No visual change."
+            exit 0
+          fi
+          # [skip ci] because committing images must not trigger another render, which
+          # would commit again, and so on.
+          git commit -m "Update design gallery screenshots [skip ci]"
+          for attempt in 1 2 3 4; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "Push failed, retrying in $((2 ** attempt))s"
+            sleep $((2 ** attempt))
+          done
+          exit 1

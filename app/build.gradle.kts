@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -65,6 +66,35 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    testOptions {
+        unitTests {
+            // The design gallery renders real Compose on the JVM through Robolectric, so
+            // the unit test classpath needs the packaged Android resources.
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+    }
+}
+
+/**
+ * The gallery renderer only runs when it is asked to record or verify.
+ *
+ * Without this it would run inside the ordinary `test` task with no baseline to compare
+ * against and fail the build, taking the APK with it. The contrast checks are deliberately
+ * not excluded — those are pure JVM assertions with no images involved, and they are the
+ * guard that stops an unreadable theme shipping again, so they belong in every build.
+ */
+tasks.withType<Test>().configureEach {
+    val renderingRequested = project.hasProperty("roborazzi.test.record") ||
+        project.hasProperty("roborazzi.test.verify") ||
+        project.hasProperty("roborazzi.test.compare")
+    if (!renderingRequested) {
+        filter {
+            excludeTestsMatching("com.rhys.obd2.design.DesignReviewTest")
+            isFailOnNoMatchingTests = false
+        }
+    }
 }
 
 dependencies {
@@ -84,4 +114,15 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
+
+    // Design review harness — see ui/gallery/Gallery.kt and DesignReviewTest.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
@@ -143,11 +144,18 @@ fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
 
         item {
             SectionCard(title = "App") {
-                MenuRow(
-                    Icons.Filled.Settings,
-                    "Settings",
-                    "Units, screen behaviour, dashboard layout",
-                ) { onNavigate(Routes.SETTINGS) }
+                Column {
+                    MenuRow(
+                        Icons.Filled.Settings,
+                        "Settings",
+                        "Units, screen behaviour, dashboard layout",
+                    ) { onNavigate(Routes.SETTINGS) }
+                    MenuRow(
+                        Icons.Filled.Palette,
+                        "Design lab",
+                        "Every component and state, in both themes",
+                    ) { onNavigate(Routes.DESIGN_LAB) }
+                }
             }
         }
 

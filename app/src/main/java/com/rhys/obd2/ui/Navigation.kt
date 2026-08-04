@@ -36,6 +36,7 @@ import com.rhys.obd2.data.ConnectionState
 import com.rhys.obd2.ui.screens.CodeLookupScreen
 import com.rhys.obd2.ui.screens.ConnectScreen
 import com.rhys.obd2.ui.screens.DashboardScreen
+import com.rhys.obd2.ui.screens.DesignLabScreen
 import com.rhys.obd2.ui.screens.DtcScreen
 import com.rhys.obd2.ui.screens.GarageScreen
 import com.rhys.obd2.ui.screens.LiveDataScreen
@@ -63,6 +64,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val LOOKUP = "lookup"
     const val TRIP = "trip"
+    const val DESIGN_LAB = "design-lab"
 }
 
 private data class Destination(
@@ -198,6 +200,7 @@ fun OpenObdApp(
                 composable(Routes.TERMINAL) { TerminalScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) { SettingsScreen(viewModel, onBack = { navController.popBackStack() }) }
                 composable(Routes.LOOKUP) { CodeLookupScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.DESIGN_LAB) { DesignLabScreen(onBack = { navController.popBackStack() }) }
             }
         }
     }
