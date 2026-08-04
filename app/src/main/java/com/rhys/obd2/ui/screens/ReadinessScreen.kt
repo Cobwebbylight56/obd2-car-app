@@ -44,6 +44,7 @@ import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.theme.colors
+import com.rhys.obd2.ui.components.ScreenHeader
 
 /**
  * Emissions readiness — the "will it pass the test" screen.
@@ -70,19 +71,10 @@ fun ReadinessScreen(
     ) {
         item {
             Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            ScreenHeader(
+                title = "Emissions health",
+                subtitle = "Readiness monitors and self-test results",
             ) {
-                Column {
-                    Text("Emissions health", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Readiness monitors and self-test results",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 if (busy != null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
         }

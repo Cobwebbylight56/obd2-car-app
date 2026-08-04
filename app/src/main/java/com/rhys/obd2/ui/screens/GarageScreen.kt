@@ -30,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -62,6 +63,7 @@ import java.util.Date
 import java.util.Locale
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.components.ScreenHeader
 
 /**
  * Per-car history that survives the car's own memory.
@@ -89,13 +91,10 @@ fun GarageScreen(viewModel: ObdViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Spacer(Modifier.height(12.dp))
-            Text("Garage", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(
-                if (vehicles.isEmpty()) "No cars recorded yet"
+            ScreenHeader(
+                title = "Garage",
+                subtitle = if (vehicles.isEmpty()) "No cars recorded yet"
                 else "${vehicles.size} car${if (vehicles.size == 1) "" else "s"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
@@ -139,26 +138,23 @@ fun GarageScreen(viewModel: ObdViewModel) {
                 subtitle = vehicle.vin ?: "No VIN reported by this car",
                 trailing = {
                     Row {
-                        Icon(
-                            Icons.Filled.Edit,
-                            contentDescription = "Rename",
-                            tint = Tone.ACCENT.color(),
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .clickable { renaming = true }
-                                .padding(7.dp),
-                        )
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = "Delete this car",
-                            tint = Tone.DANGER.color(),
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .clickable { deleting = true }
-                                .padding(7.dp),
-                        )
+                        // IconButton rather than a sized Icon: it is 48dp regardless of the
+                        // glyph inside it, announces itself as a button, and draws a ripple
+                        // that matches its real hit area rather than the icon's outline.
+                        IconButton(onClick = { renaming = true }) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Rename this car",
+                                tint = Tone.ACCENT.color(),
+                            )
+                        }
+                        IconButton(onClick = { deleting = true }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete this car and its history",
+                                tint = Tone.DANGER.color(),
+                            )
+                        }
                     }
                 },
             ) {

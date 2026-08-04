@@ -46,6 +46,7 @@ import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.components.ScreenHeader
 
 @Composable
 fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
@@ -58,8 +59,7 @@ fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Spacer(Modifier.height(12.dp))
-            Text("More", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            ScreenHeader(title = "More")
         }
 
         item {

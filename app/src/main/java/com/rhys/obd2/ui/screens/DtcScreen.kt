@@ -60,6 +60,7 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.components.ScreenHeader
 
 @Composable
 fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
@@ -80,22 +81,10 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            ScreenHeader(
+                title = "Fault codes",
+                subtitle = snapshot?.let { "${it.total} code${if (it.total == 1) "" else "s"} found" },
             ) {
-                Column {
-                    Text("Fault codes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    snapshot?.let {
-                        Text(
-                            "${it.total} code${if (it.total == 1) "" else "s"} found",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
                 if (busy != null) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {

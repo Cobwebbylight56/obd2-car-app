@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -50,6 +51,7 @@ import com.rhys.obd2.ui.components.Sparkline
 import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.components.ScreenHeader
 
 /**
  * Every parameter the car reports, live.
@@ -102,19 +104,10 @@ fun LiveDataScreen(viewModel: ObdViewModel) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            ScreenHeader(
+                title = "Live data",
+                subtitle = "${available.size} parameters available · ${selected.size} polling",
             ) {
-                Column {
-                    Text("Live data", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${available.size} parameters available · ${selected.size} polling",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 StatusPill("%.1f/s".format(rate), if (rate > 2) Tone.ACCENT else Tone.INFO)
             }
 
@@ -271,15 +264,20 @@ private fun LiveRow(
                 }
             }
 
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                Icons.Filled.PushPin,
-                contentDescription = if (isPinned) "Unpin from dashboard" else "Pin to dashboard",
-                tint = if (isPinned) Tone.ACCENT.color() else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier
-                    .size(20.dp)
-                    .clickable(onClick = onPin),
-            )
+            Spacer(Modifier.width(4.dp))
+            // Was a 20dp icon: under half the 48dp minimum, and this is a control people
+            // reach for one-handed in a parked car.
+            IconButton(onClick = onPin) {
+                Icon(
+                    Icons.Filled.PushPin,
+                    contentDescription = if (isPinned) "Unpin from dashboard" else "Pin to dashboard",
+                    tint = if (isPinned) {
+                        Tone.ACCENT.color()
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
 
         val history = value?.history.orEmpty()
