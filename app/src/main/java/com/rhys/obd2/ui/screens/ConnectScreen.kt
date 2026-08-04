@@ -58,9 +58,9 @@ import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.theme.colors
 
 @Composable
 fun ConnectScreen(
@@ -226,7 +226,7 @@ fun ConnectScreen(
                                         " nearby — show anyway"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Accent,
+                                color = Tone.ACCENT.color(),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
@@ -296,7 +296,7 @@ fun ConnectScreen(
 
         item {
             ExplainerCard(
-                accent = Info,
+                tone = Tone.INFO,
                 text = "First time? Plug the adapter into the OBD-II socket — usually under the " +
                     "dashboard on the driver's side, near the pedals or above them. Turn the ignition " +
                     "to position II so the dashboard lights come on; the engine doesn't need to be " +
@@ -329,7 +329,7 @@ private fun ConnectionStatusCard(
         is ConnectionState.Disconnected -> {
             SectionCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusPill("Not connected", MaterialTheme.colorScheme.onSurfaceVariant)
+                    StatusPill("Not connected", Tone.NEUTRAL)
                 }
             }
         }
@@ -347,7 +347,7 @@ private fun ConnectionStatusCard(
         is ConnectionState.Connected -> {
             SectionCard(title = "Connected", subtitle = connection.deviceName) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusPill("Talking to the car", Accent)
+                    StatusPill("Talking to the car", Tone.ACCENT)
                     connection.protocol?.let {
                         Text(
                             "Protocol: $it",
@@ -376,7 +376,7 @@ private fun ConnectionStatusCard(
         is ConnectionState.Failed -> {
             SectionCard(title = "Couldn't connect", subtitle = connection.deviceName) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatusPill("Failed", Danger)
+                    StatusPill("Failed", Tone.DANGER)
                     Text(connection.message, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { viewModel.connectToLastDevice() }) { Text("Try again") }
@@ -408,7 +408,7 @@ private fun DeviceRow(
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(
-                    if (highlight) Accent.copy(alpha = 0.15f)
+                    if (highlight) Tone.ACCENT.colors().container
                     else MaterialTheme.colorScheme.surfaceVariant
                 ),
             contentAlignment = Alignment.Center,
@@ -416,7 +416,7 @@ private fun DeviceRow(
             Icon(
                 Icons.Filled.Bluetooth,
                 contentDescription = null,
-                tint = if (highlight) Accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (highlight) Tone.ACCENT.color() else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -431,7 +431,7 @@ private fun DeviceRow(
             )
         }
         if (highlight) {
-            StatusPill("Likely", Accent)
+            StatusPill("Likely", Tone.ACCENT)
         }
     }
 }

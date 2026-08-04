@@ -41,10 +41,9 @@ import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.theme.colors
 
 /**
  * Emissions readiness — the "will it pass the test" screen.
@@ -89,7 +88,7 @@ fun ReadinessScreen(
         }
 
         if (connection !is ConnectionState.Connected) {
-            item { ExplainerCard(accent = Info, text = "Connect to the car to check emissions readiness.") }
+            item { ExplainerCard(tone = Tone.INFO, text = "Connect to the car to check emissions readiness.") }
             return@LazyColumn
         }
 
@@ -116,7 +115,7 @@ fun ReadinessScreen(
         if (current == null) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "Tap Check now. Readiness monitors are the self-tests your car runs on its " +
                         "own emissions equipment while you drive. An MOT or emissions test checks these " +
                         "before it checks anything else.",
@@ -187,27 +186,27 @@ private fun VerdictCard(readiness: Readiness, storedCodes: Int) {
 
     val (colour, headline, detail) = when {
         blockedByCodes -> Triple(
-            Danger,
+            Tone.DANGER.color(),
             "Would fail an emissions test",
             "The engine management light is on, or there are stored fault codes. That's an automatic " +
                 "failure regardless of how the car actually runs. Fix the fault first, then let the " +
                 "monitors complete again.",
         )
         incomplete == 0 -> Triple(
-            Accent,
+            Tone.ACCENT.color(),
             "Ready for an emissions test",
             "Every monitor this car supports has completed and no faults are stored. This is the state " +
                 "a test station wants to see.",
         )
         incomplete <= 2 -> Triple(
-            Warning,
+            Tone.WARNING.color(),
             "$incomplete monitor${if (incomplete == 1) "" else "s"} not yet complete",
             "No faults are stored, but $incomplete self-test hasn't finished running. Most testing " +
                 "regimes allow one or two incomplete monitors on older cars and none on newer ones, so " +
                 "this may or may not pass. A proper drive cycle will finish them off.",
         )
         else -> Triple(
-            Warning,
+            Tone.WARNING.color(),
             "$incomplete monitors not yet complete",
             "This many incomplete monitors usually means the codes were cleared or the battery was " +
                 "disconnected recently. The car needs a good run — see the drive cycle below — before " +
@@ -246,7 +245,7 @@ private fun VerdictCard(readiness: Readiness, storedCodes: Int) {
 
             if (readiness.dtcCount > 0) {
                 Spacer(Modifier.height(10.dp))
-                StatusPill("${readiness.dtcCount} code${if (readiness.dtcCount == 1) "" else "s"} reported by the ECU", Danger)
+                StatusPill("${readiness.dtcCount} code${if (readiness.dtcCount == 1) "" else "s"} reported by the ECU", Tone.DANGER)
             }
         }
     }
@@ -254,7 +253,7 @@ private fun VerdictCard(readiness: Readiness, storedCodes: Int) {
 
 @Composable
 private fun MonitorRow(monitor: Monitor) {
-    val colour = if (monitor.complete) Accent else Warning
+    val colour = if (monitor.complete) Tone.ACCENT.color() else Tone.WARNING.color()
     Row(
         Modifier
             .fillMaxWidth()
@@ -303,10 +302,10 @@ private fun DriveStep(number: Int, text: String) {
             Modifier
                 .size(20.dp)
                 .clip(CircleShape)
-                .background(Info.copy(alpha = 0.18f)),
+                .background(Tone.INFO.colors().container),
             contentAlignment = Alignment.Center,
         ) {
-            Text("$number", fontSize = 11.sp, color = Info, fontWeight = FontWeight.Bold)
+            Text("$number", fontSize = 11.sp, color = Tone.INFO.color(), fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))

@@ -43,8 +43,8 @@ import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.Routes
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Info
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 @Composable
 fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
@@ -85,7 +85,7 @@ fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
                         }
                         StatusPill(
                             if (connection is ConnectionState.Connected) "Online" else "Offline",
-                            if (connection is ConnectionState.Connected) Accent else Info,
+                            if (connection is ConnectionState.Connected) Tone.ACCENT else Tone.INFO,
                         )
                     }
                     Spacer(Modifier.height(12.dp))
@@ -200,7 +200,7 @@ private fun MenuRow(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, Modifier.size(18.dp), tint = Accent)
+            Icon(icon, contentDescription = null, Modifier.size(18.dp), tint = Tone.ACCENT.color())
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

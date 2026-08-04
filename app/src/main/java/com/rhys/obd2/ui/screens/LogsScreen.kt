@@ -34,13 +34,12 @@ import androidx.core.content.FileProvider
 import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.SectionCard
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 @Composable
 fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit, onOpen: (File) -> Unit) {
@@ -73,7 +72,7 @@ fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit, onOpen: (File) -> Un
         if (logs.isEmpty()) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "No recordings yet. Tap Record on the dashboard while connected, and every " +
                         "reading is written to a CSV you can open in a spreadsheet or plot later. " +
                         "Useful for chasing intermittent faults that never happen while you're looking.",
@@ -102,13 +101,13 @@ fun LogsScreen(viewModel: ObdViewModel, onBack: () -> Unit, onOpen: (File) -> Un
                             )
                         }
                         IconButton(onClick = { share(context, log) }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Share", tint = Accent)
+                            Icon(Icons.Filled.Share, contentDescription = "Share", tint = Tone.ACCENT.color())
                         }
                         IconButton(onClick = {
                             viewModel.deleteLog(log)
                             logs = viewModel.listLogs()
                         }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Danger)
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Tone.DANGER.color())
                         }
                     }
                 }

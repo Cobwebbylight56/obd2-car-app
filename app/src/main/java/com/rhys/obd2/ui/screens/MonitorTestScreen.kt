@@ -39,10 +39,8 @@ import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Service 06 results: the actual measurements behind each pass or fail.
@@ -82,7 +80,7 @@ fun MonitorTestScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
         }
 
         if (connection !is ConnectionState.Connected) {
-            item { ExplainerCard(accent = Info, text = "Connect to the car to read on-board test results.") }
+            item { ExplainerCard(tone = Tone.INFO, text = "Connect to the car to read on-board test results.") }
             return@LazyColumn
         }
 
@@ -100,7 +98,7 @@ fun MonitorTestScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
 
         item {
             ExplainerCard(
-                accent = Info,
+                tone = Tone.INFO,
                 text = "This is the early-warning screen. Where the codes page tells you what has already " +
                     "failed, this shows how close each component is to its limit — so a catalytic " +
                     "converter or oxygen sensor on the way out is visible months before it sets a code. " +
@@ -129,7 +127,7 @@ fun MonitorTestScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                         val failed = results.count { !it.passed }
                         StatusPill(
                             if (failed == 0) "Pass" else "$failed failing",
-                            if (failed == 0) Accent else Danger,
+                            if (failed == 0) Tone.ACCENT else Tone.DANGER,
                         )
                     },
                 ) {
@@ -148,9 +146,9 @@ fun MonitorTestScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
 private fun TestRow(test: MonitorTest) {
     val margin = test.margin
     val colour = when {
-        !test.passed -> Danger
-        margin != null && (margin > 0.85 || margin < 0.15) -> Warning
-        else -> Accent
+        !test.passed -> Tone.DANGER.color()
+        margin != null && (margin > 0.85 || margin < 0.15) -> Tone.WARNING.color()
+        else -> Tone.ACCENT.color()
     }
 
     Column {

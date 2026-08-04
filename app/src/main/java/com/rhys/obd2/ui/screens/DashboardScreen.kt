@@ -49,9 +49,9 @@ import com.rhys.obd2.ui.components.Gauge
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.Sparkline
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
+import com.rhys.obd2.ui.theme.colors
 
 @Composable
 fun DashboardScreen(
@@ -186,7 +186,7 @@ private fun GaugeTile(
                         .fillMaxWidth()
                         .height(28.dp)
                         .padding(top = 4.dp),
-                    colour = Accent,
+                    tone = Tone.ACCENT,
                 )
             }
         }
@@ -221,7 +221,7 @@ private fun thresholds(pidId: Int): Pair<Float?, Float?> = when (pidId) {
 
 @Composable
 private fun RecordButton(logging: Boolean, viewModel: ObdViewModel) {
-    val colour = if (logging) Danger else Accent
+    val colour = if (logging) Tone.DANGER.color() else Tone.ACCENT.color()
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
@@ -254,18 +254,18 @@ private fun FaultBanner(count: Int, onOpen: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Danger.copy(alpha = 0.12f))
+            .background(Tone.DANGER.colors().container)
             .clickable(onClick = onOpen)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Warning, contentDescription = null, tint = Danger, modifier = Modifier.size(22.dp))
+        Icon(Icons.Filled.Warning, contentDescription = null, tint = Tone.DANGER.color(), modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 "$count stored fault code${if (count == 1) "" else "s"}",
                 fontWeight = FontWeight.SemiBold,
-                color = Danger,
+                color = Tone.DANGER.color(),
             )
             Text(
                 "Tap to see what they mean",
@@ -322,7 +322,7 @@ private fun formatDuration(ms: Long): String {
 private fun NotConnected(onOpenConnect: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            StatusPill("Not connected", Info)
+            StatusPill("Not connected", Tone.NEUTRAL)
             Spacer(Modifier.height(12.dp))
             Text(
                 "Connect an adapter to see live data",
@@ -332,7 +332,7 @@ private fun NotConnected(onOpenConnect: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text(
                 "Open connection screen",
-                color = Accent,
+                color = Tone.ACCENT.color(),
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.clickable(onClick = onOpenConnect),
             )

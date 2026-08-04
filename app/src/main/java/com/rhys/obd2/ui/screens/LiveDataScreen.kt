@@ -48,8 +48,8 @@ import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.Sparkline
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Info
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Every parameter the car reports, live.
@@ -115,7 +115,7 @@ fun LiveDataScreen(viewModel: ObdViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                StatusPill("%.1f/s".format(rate), if (rate > 2) Accent else Info)
+                StatusPill("%.1f/s".format(rate), if (rate > 2) Tone.ACCENT else Tone.INFO)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -159,7 +159,7 @@ fun LiveDataScreen(viewModel: ObdViewModel) {
             if (connection !is ConnectionState.Connected) {
                 item {
                     ExplainerCard(
-                        accent = Info,
+                        tone = Tone.INFO,
                         text = "Not connected. The list below shows the common parameters; connect an " +
                             "adapter and the app will replace it with exactly what your car reports.",
                     )
@@ -167,7 +167,7 @@ fun LiveDataScreen(viewModel: ObdViewModel) {
             } else if (selected.isEmpty()) {
                 item {
                     ExplainerCard(
-                        accent = Info,
+                        tone = Tone.INFO,
                         text = "Tap parameters to start reading them. Fewer selected means each one " +
                             "updates faster — the adapter reads them one at a time.",
                     )
@@ -275,7 +275,7 @@ private fun LiveRow(
             Icon(
                 Icons.Filled.PushPin,
                 contentDescription = if (isPinned) "Unpin from dashboard" else "Pin to dashboard",
-                tint = if (isPinned) Accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                tint = if (isPinned) Tone.ACCENT.color() else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 modifier = Modifier
                     .size(20.dp)
                     .clickable(onClick = onPin),

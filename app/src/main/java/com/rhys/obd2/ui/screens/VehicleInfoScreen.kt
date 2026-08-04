@@ -39,9 +39,8 @@ import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.InfoRow
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 @Composable
 fun VehicleInfoScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
@@ -74,7 +73,7 @@ fun VehicleInfoScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
         }
 
         if (connection !is ConnectionState.Connected) {
-            item { ExplainerCard(accent = Info, text = "Connect to read the vehicle's identification.") }
+            item { ExplainerCard(tone = Tone.INFO, text = "Connect to read the vehicle's identification.") }
             return@LazyColumn
         }
 
@@ -99,7 +98,7 @@ fun VehicleInfoScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                     trailing = {
                         Text(
                             "Copy",
-                            color = Accent,
+                            color = Tone.ACCENT.color(),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier
@@ -126,7 +125,7 @@ fun VehicleInfoScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                             Spacer(Modifier.height(8.dp))
                             StatusPill(
                                 if (details.valid) "Check digit valid" else "Check digit doesn't match",
-                                if (details.valid) Accent else Warning,
+                                if (details.valid) Tone.ACCENT else Tone.WARNING,
                             )
                             if (!details.valid) {
                                 Spacer(Modifier.height(6.dp))
@@ -217,7 +216,7 @@ fun VehicleInfoScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
         if (current?.vin == null) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "No VIN reported. Reporting the VIN over OBD only became mandatory around " +
                         "2008, so plenty of older cars simply don't have it — everything else on this " +
                         "screen still works.",

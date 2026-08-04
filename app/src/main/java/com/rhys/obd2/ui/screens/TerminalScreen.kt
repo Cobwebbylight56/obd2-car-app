@@ -43,9 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Info
 import kotlinx.coroutines.launch
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Raw command console.
@@ -99,7 +99,7 @@ fun TerminalScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
             if (history.isNotEmpty()) {
                 Text(
                     "Clear",
-                    color = Accent,
+                    color = Tone.ACCENT.color(),
                     modifier = Modifier
                         .clickable { history.clear() }
                         .padding(8.dp),
@@ -130,7 +130,7 @@ fun TerminalScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                 item {
                     Spacer(Modifier.height(8.dp))
                     ExplainerCard(
-                        accent = Info,
+                        tone = Tone.INFO,
                         text = "Commands starting with AT configure the adapter itself; anything else is " +
                             "sent to the car. Try ATI for the adapter's firmware version, ATRV for battery " +
                             "voltage, 0100 for the car's supported parameters, or 03 to read fault codes " +
@@ -152,7 +152,7 @@ fun TerminalScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
-                        color = Accent,
+                        color = Tone.ACCENT.color(),
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -186,7 +186,7 @@ fun TerminalScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
-                    tint = if (input.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else Accent,
+                    tint = if (input.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else Tone.ACCENT.color(),
                 )
             }
         }

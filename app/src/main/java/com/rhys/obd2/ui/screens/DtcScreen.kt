@@ -56,12 +56,10 @@ import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.InfoRow
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
 import androidx.core.content.FileProvider
-import com.rhys.obd2.ui.theme.Warning
 import kotlinx.coroutines.launch
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 @Composable
 fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
@@ -103,7 +101,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
                 } else {
                     StatusPill(
                         if (snapshot?.milOn == true) "Engine light on" else "Light off",
-                        if (snapshot?.milOn == true) Danger else Accent,
+                        if (snapshot?.milOn == true) Tone.DANGER else Tone.ACCENT,
                     )
                 }
             }
@@ -112,7 +110,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
         if (connection !is ConnectionState.Connected) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "Connect to the car to read fault codes.",
                 )
             }
@@ -153,7 +151,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
                 OutlinedButton(
                     onClick = { confirmClear = true },
                     enabled = busy == null && (snapshot?.stored?.isNotEmpty() == true || snapshot?.pending?.isNotEmpty() == true),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Tone.DANGER.color()),
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Filled.DeleteSweep, contentDescription = null, Modifier.size(18.dp))
@@ -167,7 +165,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
         if (current == null) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "Tap Read codes. The app checks all three lists the car keeps: confirmed " +
                         "faults, pending ones that haven't happened often enough to turn the light on " +
                         "yet, and permanent emissions codes that a scan tool can't erase.",
@@ -177,7 +175,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
             item {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Tone.ACCENT.color(), modifier = Modifier.size(28.dp))
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text("No fault codes stored", fontWeight = FontWeight.SemiBold)
@@ -239,7 +237,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
 @Composable
 private fun DtcCard(dtc: Dtc) {
     var expanded by remember { mutableStateOf(false) }
-    val colour = severityColour(dtc.severity)
+    val tone = severityTone(dtc.severity)
 
     SectionCard(modifier = Modifier.clickable { expanded = !expanded }) {
         Column {
@@ -250,7 +248,7 @@ private fun DtcCard(dtc: Dtc) {
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
-                        color = colour,
+                        color = tone.color(),
                     )
                     Text(
                         dtc.description,
@@ -267,9 +265,9 @@ private fun DtcCard(dtc: Dtc) {
 
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusPill(dtc.severity.label, colour)
+                StatusPill(dtc.severity.label, tone)
                 if (dtc.manufacturerSpecific) {
-                    StatusPill("Maker-specific", Info)
+                    StatusPill("Maker-specific", Tone.INFO)
                 }
             }
 
@@ -283,12 +281,12 @@ private fun DtcCard(dtc: Dtc) {
                     )
                     dtc.advice?.let {
                         Spacer(Modifier.height(8.dp))
-                        ExplainerCard(text = it, accent = colour)
+                        ExplainerCard(text = it, tone = tone)
                     }
                     if (dtc.manufacturerSpecific) {
                         Spacer(Modifier.height(8.dp))
                         ExplainerCard(
-                            accent = Info,
+                            tone = Tone.INFO,
                             text = "This code is defined by the manufacturer rather than the OBD-II " +
                                 "standard, so the same number means different things on different makes. " +
                                 "Look it up together with your car's make, model and engine.",
@@ -309,7 +307,7 @@ private fun FreezeFrameCard(frame: FreezeFrame, units: UnitSystem) {
     ) {
         Column {
             ExplainerCard(
-                accent = Info,
+                tone = Tone.INFO,
                 text = "This is a snapshot of what the engine was doing at the exact moment the fault " +
                     "was stored. Cold or hot, idling or under load, lean or rich — it usually narrows " +
                     "the cause far more than the code alone.",
@@ -346,7 +344,7 @@ private fun ClearDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                         "test coming up, the car will need a full drive cycle afterwards or it will fail " +
                         "on incomplete monitors.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Warning,
+                    color = Tone.WARNING.color(),
                 )
                 Text(
                     "This is the only record of these codes. Tap Cancel and then Report to save " +
@@ -360,19 +358,21 @@ private fun ClearDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                colors = ButtonDefaults.buttonColors(containerColor = Tone.DANGER.color()),
             ) { Text("Clear codes") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
-private fun severityColour(severity: DtcSeverity) = when (severity) {
-    DtcSeverity.CRITICAL -> Danger
-    DtcSeverity.SERIOUS -> Danger
-    DtcSeverity.MODERATE -> Warning
-    DtcSeverity.MINOR -> Info
-    DtcSeverity.UNKNOWN -> Info
+/**
+ * Maps a severity to a meaning, not to a colour. Which hue that meaning wears is the
+ * theme's business, and keeping the two apart is what lets this stay a plain function.
+ */
+private fun severityTone(severity: DtcSeverity): Tone = when (severity) {
+    DtcSeverity.CRITICAL, DtcSeverity.SERIOUS -> Tone.DANGER
+    DtcSeverity.MODERATE -> Tone.WARNING
+    DtcSeverity.MINOR, DtcSeverity.UNKNOWN -> Tone.INFO
 }
 
 /**

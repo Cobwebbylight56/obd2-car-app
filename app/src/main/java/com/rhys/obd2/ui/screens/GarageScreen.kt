@@ -54,15 +54,14 @@ import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.ui.ObdViewModel
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.InfoRow
+import com.rhys.obd2.ui.components.RowIcon
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning as WarningColour
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Per-car history that survives the car's own memory.
@@ -103,7 +102,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
         if (vehicles.isEmpty()) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "Connect to a car and it gets added here automatically, identified by its " +
                         "VIN. From then on every fault code, unusual reading and recorded trip is " +
                         "kept with a date and time — including codes you later clear, which the car " +
@@ -143,7 +142,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
                         Icon(
                             Icons.Filled.Edit,
                             contentDescription = "Rename",
-                            tint = Accent,
+                            tint = Tone.ACCENT.color(),
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
@@ -153,7 +152,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
                         Icon(
                             Icons.Filled.Delete,
                             contentDescription = "Delete this car",
-                            tint = Danger,
+                            tint = Tone.DANGER.color(),
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
@@ -165,7 +164,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
             ) {
                 Column {
                     if (vehicle.key == current?.key) {
-                        StatusPill("Plugged in now", Accent)
+                        StatusPill("Plugged in now", Tone.ACCENT)
                         Spacer(Modifier.height(8.dp))
                     }
                     vehicle.manufacturer?.let { InfoRow("Manufacturer", it) }
@@ -177,7 +176,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
                     if (!vehicle.identifiedByVin) {
                         Spacer(Modifier.height(10.dp))
                         ExplainerCard(
-                            accent = WarningColour,
+                            tone = Tone.WARNING,
                             text = "This car doesn't report a VIN — common before about 2008 — so it's " +
                                 "identified by its ECU calibration or the adapter used. Reading two " +
                                 "different VIN-less cars with the same adapter could merge their " +
@@ -200,7 +199,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
         if (events.isEmpty()) {
             item {
                 ExplainerCard(
-                    accent = Info,
+                    tone = Tone.INFO,
                     text = "Nothing recorded for this car yet. Fault codes, unusual readings and " +
                         "recorded trips will appear here as they happen.",
                 )
@@ -262,7 +261,7 @@ private fun VehicleRow(
         Icon(
             Icons.Filled.DirectionsCar,
             contentDescription = null,
-            tint = if (isConnected) Accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (isConnected) Tone.ACCENT.color() else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
@@ -276,27 +275,19 @@ private fun VehicleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (isConnected) StatusPill("Now", Accent)
+        if (isConnected) StatusPill("Now", Tone.ACCENT)
     }
 }
 
 @Composable
 private fun HistoryCard(event: VehicleHistoryEvent) {
     var expanded by remember { mutableStateOf(false) }
-    val (icon, colour) = presentation(event.type)
+    val (icon, tone) = presentation(event.type)
 
     SectionCard(modifier = Modifier.clickable { expanded = !expanded }) {
         Column {
             Row(verticalAlignment = Alignment.Top) {
-                Box(
-                    Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(colour.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(icon, contentDescription = null, tint = colour, modifier = Modifier.size(16.dp))
-                }
+                RowIcon(icon, tone)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(event.title, fontWeight = FontWeight.Medium)
@@ -322,10 +313,9 @@ private fun HistoryCard(event: VehicleHistoryEvent) {
                 if (!expanded) {
                     Text(
                         "Tap for detail",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 10.sp,
-                        color = colour,
-                        modifier = Modifier.padding(top = 6.dp, start = 42.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tone.color(),
+                        modifier = Modifier.padding(top = 6.dp, start = 50.dp),
                     )
                 }
             }
@@ -333,15 +323,15 @@ private fun HistoryCard(event: VehicleHistoryEvent) {
     }
 }
 
-private fun presentation(type: EventType): Pair<ImageVector, androidx.compose.ui.graphics.Color> =
-    when (type) {
-        EventType.CONNECTED -> Icons.Filled.Link to Info
-        EventType.CODES_FOUND -> Icons.Filled.Warning to Danger
-        EventType.CODES_CLEARED -> Icons.Filled.DeleteSweep to WarningColour
-        EventType.ABNORMAL -> Icons.Filled.Bolt to WarningColour
-        EventType.TRIP -> Icons.Filled.Timeline to Accent
-        EventType.NOTE -> Icons.Filled.DirectionsCar to Info
-    }
+/** How an event reads at a glance: an icon for the kind, a tone for how much it matters. */
+private fun presentation(type: EventType): Pair<ImageVector, Tone> = when (type) {
+    EventType.CONNECTED -> Icons.Filled.Link to Tone.INFO
+    EventType.CODES_FOUND -> Icons.Filled.Warning to Tone.DANGER
+    EventType.CODES_CLEARED -> Icons.Filled.DeleteSweep to Tone.WARNING
+    EventType.ABNORMAL -> Icons.Filled.Bolt to Tone.WARNING
+    EventType.TRIP -> Icons.Filled.Timeline to Tone.ACCENT
+    EventType.NOTE -> Icons.Filled.DirectionsCar to Tone.INFO
+}
 
 @Composable
 private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
@@ -384,14 +374,14 @@ private fun DeleteDialog(
                         "itself forgot them when they were cleared. If you might want the record " +
                         "later, save a diagnostic report from the Codes screen first.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = WarningColour,
+                    color = Tone.WARNING.color(),
                 )
             }
         },
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                colors = ButtonDefaults.buttonColors(containerColor = Tone.DANGER.color()),
             ) { Text("Delete") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

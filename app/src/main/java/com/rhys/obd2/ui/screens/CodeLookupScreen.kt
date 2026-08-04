@@ -36,9 +36,8 @@ import com.rhys.obd2.obd.DtcStatus
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.StatusPill
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Offline code lookup.
@@ -107,7 +106,7 @@ fun CodeLookupScreen(onBack: () -> Unit) {
             if (query.isBlank()) {
                 item {
                     ExplainerCard(
-                        accent = Info,
+                        tone = Tone.INFO,
                         text = "Type a code to see what it means, or describe the symptom — searching " +
                             "for \"misfire\", \"lean\" or \"catalyst\" works too. A partial code lists " +
                             "the whole family, so P03 shows every misfire code.",
@@ -157,10 +156,10 @@ private fun LookupCard(
     advice: String?,
     manufacturerSpecific: Boolean,
 ) {
-    val colour = when (severity) {
-        DtcSeverity.CRITICAL, DtcSeverity.SERIOUS -> Danger
-        DtcSeverity.MODERATE -> Warning
-        else -> Info
+    val tone = when (severity) {
+        DtcSeverity.CRITICAL, DtcSeverity.SERIOUS -> Tone.DANGER
+        DtcSeverity.MODERATE -> Tone.WARNING
+        else -> Tone.INFO
     }
 
     SectionCard {
@@ -170,17 +169,17 @@ private fun LookupCard(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
-                color = colour,
+                color = tone.color(),
             )
             Text(description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 2.dp))
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusPill(severity.label, colour)
-                if (manufacturerSpecific) StatusPill("Maker-specific", Info)
+                StatusPill(severity.label, tone)
+                if (manufacturerSpecific) StatusPill("Maker-specific", Tone.INFO)
             }
             advice?.let {
                 Spacer(Modifier.height(8.dp))
-                ExplainerCard(text = it, accent = colour)
+                ExplainerCard(text = it, tone = tone)
             }
         }
     }

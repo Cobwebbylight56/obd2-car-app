@@ -35,11 +35,9 @@ import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.InfoRow
 import com.rhys.obd2.ui.components.LineChart
 import com.rhys.obd2.ui.components.SectionCard
-import com.rhys.obd2.ui.theme.Accent
-import com.rhys.obd2.ui.theme.Danger
-import com.rhys.obd2.ui.theme.Info
-import com.rhys.obd2.ui.theme.Warning
 import java.io.File
+import com.rhys.obd2.ui.theme.Tone
+import com.rhys.obd2.ui.theme.color
 
 /**
  * Reviews a recorded trip.
@@ -88,7 +86,7 @@ fun TripDetailScreen(file: File, onBack: () -> Unit) {
 
         if (log == null || log.populated.isEmpty()) {
             ExplainerCard(
-                accent = Info,
+                tone = Tone.INFO,
                 text = "This log has no readable data in it. That usually means the recording was " +
                     "stopped within a second or two of starting, before any rows were written.",
                 modifier = Modifier.padding(16.dp),
@@ -103,7 +101,7 @@ fun TripDetailScreen(file: File, onBack: () -> Unit) {
                     label = s.label,
                     unit = s.unit,
                     values = s.values,
-                    colour = SERIES_COLOURS[index % SERIES_COLOURS.size],
+                    colour = SERIES_TONES[index % SERIES_TONES.size].color(),
                 )
             }
 
@@ -180,7 +178,14 @@ fun TripDetailScreen(file: File, onBack: () -> Unit) {
     }
 }
 
-private val SERIES_COLOURS = listOf(Accent, Info, Warning, Danger)
+/**
+ * Line colours for the chart, in the order series get assigned.
+ *
+ * Ordered so that adjacent pairs stay distinguishable for the common forms of colour
+ * blindness — green then blue then amber then red, rather than green next to red. The
+ * legend also names each series, so the chart is readable without relying on colour at all.
+ */
+private val SERIES_TONES = listOf(Tone.ACCENT, Tone.INFO, Tone.WARNING, Tone.DANGER)
 
 private fun fmt(value: Float?): String = when {
     value == null -> "—"
