@@ -14,20 +14,29 @@ Built because the scanner app I was using stopped being supported.
 
 You don't need Android Studio. Every push to this repository builds a working APK.
 
+**The easy way — [Releases](https://github.com/Cobwebbylight56/obd2-car-app/releases).**
+Tap the `.apk` on the latest release and open it. No zip, no extracting, and the link
+doesn't expire.
+
+**From a build** if you want something newer than the last release:
+
 1. Go to the [**Actions** tab](https://github.com/Cobwebbylight56/obd2-car-app/actions/workflows/build.yml).
 2. Click the most recent green **Build APK** run.
-3. Scroll to **Artifacts** and download `OpenOBD-debug-apk`.
-4. Unzip it, copy `app-debug.apk` to your phone, and open it.
-5. Android will ask you to allow installing from that source — that's expected for an app
-   that isn't from the Play Store.
+3. Scroll to **Artifacts** and download it.
+4. Unzip, copy the `.apk` to your phone, and open it.
 
-For a permanent download link instead of a 90-day artifact, push a tag:
+Android will ask you to allow installing from that source — expected for an app that isn't
+from the Play Store.
+
+Each APK is named after the commit it was built from (`OpenOBD-b9d8c79.apk`), because
+Android never overwrites a download: it appends `(1)`, `(2)` and so on, and a folder full
+of identically-named files can only be told apart by a timestamp that is recorded in UTC.
+
+To publish a release, tag a commit:
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
-
-That publishes the APK to the repository's Releases page.
 
 ### Updating later
 

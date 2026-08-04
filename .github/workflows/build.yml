@@ -57,18 +57,29 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
+      # Name the APK after the commit before it goes anywhere. Android never overwrites a
+      # download — it appends (1), (2) and so on — so a Downloads folder ends up holding
+      # several files called app-debug.apk that can only be told apart by a timestamp,
+      # which is in UTC and therefore reads an hour off in British summer time.
+      - name: Name the APK after the commit
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             "dist/OpenOBD-${GITHUB_SHA::7}.apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOBD-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: OpenOBD-${{ github.sha }}
+          path: dist/*.apk
           if-no-files-found: error
 
-      # Tagging a commit v1.0.0 (or similar) publishes the APK as a GitHub Release,
-      # which gives a stable download link rather than a 90-day artifact.
+      # Tagging a commit v1.0.0 (or similar) publishes the APK as a GitHub Release, which
+      # gives a permanent, directly downloadable link — no zip to extract — rather than a
+      # 90-day artifact.
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: dist/*.apk
           generate_release_notes: true
