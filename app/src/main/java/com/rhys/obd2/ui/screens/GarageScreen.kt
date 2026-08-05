@@ -508,6 +508,7 @@ private fun presentation(type: EventType): Pair<ImageVector, Tone> = when (type)
     EventType.CODES_CLEARED -> Icons.Filled.DeleteSweep to Tone.WARNING
     EventType.ABNORMAL -> Icons.Filled.Bolt to Tone.WARNING
     EventType.TRIP -> Icons.Filled.Timeline to Tone.ACCENT
+    EventType.MILEAGE -> Icons.Filled.Speed to Tone.INFO
     EventType.NOTE -> Icons.Filled.DirectionsCar to Tone.INFO
 }
 
