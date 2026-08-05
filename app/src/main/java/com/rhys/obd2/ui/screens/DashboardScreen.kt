@@ -170,7 +170,7 @@ private fun GaugeTile(
                 value = rawValue?.toFloat() ?: pid.min.toFloat(),
                 min = gaugeMin(pid).toFloat(),
                 max = gaugeMax(pid).toFloat(),
-                label = pid.name,
+                label = pid.shortName,
                 unit = displayUnit,
                 valueText = text,
                 warningThreshold = warn,
