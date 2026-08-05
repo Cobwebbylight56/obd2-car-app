@@ -126,16 +126,23 @@ fun Gauge(
     val colour = when {
         optimalRange != null -> {
             val warmFrom = optimalRange.start
-            val hotFrom = warningThreshold ?: optimalRange.endInclusive
-            val hotTo = dangerThreshold ?: (hotFrom + 10f)
+            val optimalTo = optimalRange.endInclusive
+            val hotTo = dangerThreshold ?: (optimalTo + 10f)
+            // Amber sits between green and red rather than being skipped. Blending the two
+            // ends directly passes through a desaturated grey-green midpoint that reads as
+            // a faded gauge rather than a warming one — which is exactly what 108 °C looked
+            // like before: washed out, and not obviously worse than 90.
+            val midHot = (optimalTo + hotTo) / 2f
             when {
                 // Fully cold below the point where an engine is unambiguously not warm.
                 value <= COLD_ANCHOR -> cold
                 value < warmFrom ->
                     lerp(cold, accent, ((value - COLD_ANCHOR) / (warmFrom - COLD_ANCHOR)).coerceIn(0f, 1f))
-                value <= optimalRange.endInclusive -> accent
+                value <= optimalTo -> accent
+                value < midHot ->
+                    lerp(accent, warning, ((value - optimalTo) / (midHot - optimalTo)).coerceIn(0f, 1f))
                 value < hotTo ->
-                    lerp(accent, danger, ((value - optimalRange.endInclusive) / (hotTo - optimalRange.endInclusive)).coerceIn(0f, 1f))
+                    lerp(warning, danger, ((value - midHot) / (hotTo - midHot)).coerceIn(0f, 1f))
                 else -> danger
             }
         }
