@@ -26,6 +26,18 @@ class Settings(context: Context) {
     private val _autoConnect = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CONNECT, true))
     val autoConnect: StateFlow<Boolean> = _autoConnect.asStateFlow()
 
+    /**
+     * Whether the odometer card sits at the top of the dashboard.
+     *
+     * On by default because a car that does report its mileage should say so without
+     * being asked, and because the rollback warning is the kind of thing you want to be
+     * shown rather than to have to go looking for. Off is a legitimate preference: the
+     * card occupies the most valuable strip of the screen, and on a car that has no
+     * odometer to report it is occupying it for nothing.
+     */
+    private val _showOdometer = MutableStateFlow(prefs.getBoolean(KEY_SHOW_ODOMETER, true))
+    val showOdometer: StateFlow<Boolean> = _showOdometer.asStateFlow()
+
     fun setUnits(value: UnitSystem) {
         _units.value = value
         prefs.edit().putString(KEY_UNITS, value.name).apply()
@@ -44,6 +56,11 @@ class Settings(context: Context) {
     fun setAutoConnect(value: Boolean) {
         _autoConnect.value = value
         prefs.edit().putBoolean(KEY_AUTO_CONNECT, value).apply()
+    }
+
+    fun setShowOdometer(value: Boolean) {
+        _showOdometer.value = value
+        prefs.edit().putBoolean(KEY_SHOW_ODOMETER, value).apply()
     }
 
     /** The adapter used last time, so the connect screen can offer to reconnect. */
@@ -83,6 +100,7 @@ class Settings(context: Context) {
         const val KEY_DASHBOARD = "dashboard_pids"
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         const val KEY_AUTO_CONNECT = "auto_connect"
+        const val KEY_SHOW_ODOMETER = "show_odometer"
         const val KEY_LAST_ADDRESS = "last_address"
         const val KEY_LAST_NAME = "last_name"
         const val KEY_LAST_KIND = "last_kind"

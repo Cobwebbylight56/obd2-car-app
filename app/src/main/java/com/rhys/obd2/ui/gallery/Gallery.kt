@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.rhys.obd2.data.UnitSystem
 import com.rhys.obd2.ui.components.EmptyState
 import com.rhys.obd2.ui.components.ExplainerCard
 import com.rhys.obd2.ui.components.Gauge
@@ -40,6 +41,7 @@ import com.rhys.obd2.ui.components.SectionCard
 import com.rhys.obd2.ui.components.Sparkline
 import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.components.TappableRow
+import com.rhys.obd2.ui.screens.OdometerHeader
 import com.rhys.obd2.ui.theme.MonoBody
 import com.rhys.obd2.ui.theme.NumericLarge
 import com.rhys.obd2.ui.theme.NumericMedium
@@ -615,6 +617,25 @@ object Gallery {
     }
 
     private fun MutableList<GalleryEntry>.structure() {
+        add(
+            GalleryEntry(
+                group = "Structure",
+                name = "odometer-header-states",
+                notes = "The card pinned above the dashboard gauges, in all three states it " +
+                    "can be in. The rollback state is the one that matters and the one no " +
+                    "healthy car will ever produce, so this is the only place it gets looked " +
+                    "at. The middle state is deliberately short-lived: once the app knows the " +
+                    "car has no odometer to report, the dashboard drops the card rather than " +
+                    "keeping a permanent apology at the top of the screen.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    OdometerHeader(km = 296_720.0, units = UnitSystem.UK, rollback = false)
+                    OdometerHeader(km = null, units = UnitSystem.UK, rollback = false)
+                    OdometerHeader(km = 148_300.0, units = UnitSystem.UK, rollback = true)
+                }
+            }
+        )
+
         add(
             GalleryEntry(group = "Structure", name = "screen-header") {
                 Column {

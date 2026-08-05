@@ -74,6 +74,20 @@ fun DashboardScreen(
     val rollback = remember(vehicle?.key) { viewModel.odometerWentBackwards() }
     val supported by viewModel.supportedPids.collectAsState()
     val loadEstimate by viewModel.loadEstimate.collectAsState()
+    val showOdometer by viewModel.settings.showOdometer.collectAsState()
+
+    val odometerKm = live[0xA6]?.primary?.value
+
+    // Two separate reasons to leave the card out, and they are not the same thing.
+    //
+    // The setting is the driver saying they don't want it. The second clause is the app
+    // knowing there is nothing to put in it: once the supported-parameter scan has come
+    // back and 0xA6 is not in it, this car will never report mileage, and a card whose
+    // only content is "not reported" has no business holding the top of the dashboard for
+    // the rest of the car's life. Settings says which of the two is in force, so the
+    // toggle never looks broken.
+    val odometerUnavailable = odometerKm == null && !rollback &&
+        supported.isNotEmpty() && 0xA6 !in supported
 
     // Substituted, not added alongside. Two load gauges side by side, one real and one
     // derived, is a puzzle rather than a dashboard.
@@ -126,12 +140,14 @@ fun DashboardScreen(
             }
         }
 
-        item(span = { GridItemSpan(2) }) {
-            OdometerHeader(
-                km = live[0xA6]?.primary?.value,
-                units = units,
-                rollback = rollback,
-            )
+        if (showOdometer && !odometerUnavailable) {
+            item(span = { GridItemSpan(2) }) {
+                OdometerHeader(
+                    km = odometerKm,
+                    units = units,
+                    rollback = rollback,
+                )
+            }
         }
 
         if (codes != null && codes!!.stored.isNotEmpty()) {
@@ -450,10 +466,16 @@ private fun NotConnected(onOpenConnect: () -> Unit) {
  *
  * Most cars will show nothing here, and the card says so rather than sitting blank. The
  * odometer only reached the standard in a later revision and is rare on anything built
- * before roughly 2018 — every car this app was written for will come up empty.
+ * before roughly 2018 — every car this app was written for will come up empty. That state
+ * is only worth showing while it is still uncertain: once the app knows the car doesn't
+ * report mileage the caller drops the card entirely, and the driver can drop it themselves
+ * from Settings whether the car reports it or not.
+ *
+ * Internal rather than private so the design gallery can render all three of its states
+ * without a car, an adapter or a ViewModel.
  */
 @Composable
-private fun OdometerHeader(km: Double?, units: UnitSystem, rollback: Boolean) {
+internal fun OdometerHeader(km: Double?, units: UnitSystem, rollback: Boolean) {
     val converted = km?.let { Units.convert(it, "km", units) }
 
     SectionCard(

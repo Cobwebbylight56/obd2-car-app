@@ -39,8 +39,14 @@ fun SettingsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
     val units by viewModel.settings.units.collectAsState()
     val keepScreenOn by viewModel.settings.keepScreenOn.collectAsState()
     val autoConnect by viewModel.settings.autoConnect.collectAsState()
+    val showOdometer by viewModel.settings.showOdometer.collectAsState()
     val dashboardPids by viewModel.settings.dashboardPids.collectAsState()
     val supported by viewModel.supportedPids.collectAsState()
+
+    // The toggle can be on and the card still absent, because this car has no mileage to
+    // report. Saying so here is the difference between a considered decision and an
+    // apparently broken switch.
+    val odometerReported = supported.isEmpty() || 0xA6 in supported
 
     LazyColumn(
         modifier = Modifier
@@ -111,6 +117,22 @@ fun SettingsScreen(viewModel: ObdViewModel, onBack: () -> Unit) {
                             "don't have to pick it every time. Disconnecting by hand won't trigger it.",
                         autoConnect,
                     ) { viewModel.settings.setAutoConnect(it) }
+                    ToggleRow(
+                        "Show odometer on the dashboard",
+                        when {
+                            odometerReported ->
+                                "Pins total mileage above the gauges, and warns you there " +
+                                    "if a reading ever comes back lower than an earlier one."
+                            showOdometer ->
+                                "On, but nothing to show — this car doesn't report its " +
+                                    "mileage over OBD-II. The card will appear by itself on " +
+                                    "a car that does."
+                            else ->
+                                "Off. This car doesn't report its mileage over OBD-II " +
+                                    "anyway, so turning it on would show nothing."
+                        },
+                        showOdometer,
+                    ) { viewModel.settings.setShowOdometer(it) }
                 }
             }
         }
