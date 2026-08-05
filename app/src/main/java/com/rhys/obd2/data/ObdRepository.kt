@@ -172,6 +172,9 @@ class ObdRepository(
     private val _currentVehicle = MutableStateFlow<Vehicle?>(null)
     val currentVehicle: StateFlow<Vehicle?> = _currentVehicle.asStateFlow()
 
+    /** Cleared on each connection, so one reading is kept per session. */
+    private var odometerRecorded = false
+
     private var pollJob: Job? = null
     private var pollTargets: List<Int> = emptyList()
 
@@ -312,6 +315,7 @@ class ObdRepository(
         retiredAt.clear()
         unsupportedPids.clear()
         saturatedCounts.clear()
+        odometerRecorded = false
         failureCounts.clear()
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
@@ -508,6 +512,17 @@ class ObdRepository(
         val readings = definition.decode(result.data)
         if (readings.isEmpty()) return
 
+        // The odometer is worth keeping outside the car, because the car keeps no history
+        // of it — only the current number. Recorded once a session rather than on every
+        // read, since it changes by a tenth of a kilometre at a time and a log of that
+        // would be noise.
+        if (pidId == PID_ODOMETER && !odometerRecorded) {
+            readings.firstOrNull()?.value?.takeIf { it > 0 }?.let { km ->
+                odometerRecorded = true
+                _currentVehicle.value?.let { vehicle -> recordMileage(vehicle, km) }
+            }
+        }
+
         val now = System.currentTimeMillis()
 
         // A reading outside its healthy range is worth a dated note in the car's history,
@@ -536,6 +551,52 @@ class ObdRepository(
         }
 
         tripLogger.record(pidId, definition, readings, now)
+    }
+
+    /**
+     * Files an odometer reading, and raises it as an event if it went backwards.
+     *
+     * A decrease is recorded at the severity it deserves. Barring a replaced cluster or
+     * ECU, an odometer does not run backwards, and this record — kept outside the car,
+     * with dates — is the only place that comparison can be made at all.
+     */
+    private fun recordMileage(vehicle: Vehicle, km: Double) {
+        val verdict = garage.recordOdometer(vehicle.key, km)
+        val miles = km * 0.621371
+        val now = System.currentTimeMillis()
+
+        when (verdict) {
+            MileageVerdict.WENT_BACKWARDS -> {
+                val highest = garage.odometerHistory(vehicle.key).maxByOrNull { it.km }
+                garage.record(
+                    vehicle.key,
+                    VehicleHistoryEvent(
+                        timestamp = now,
+                        type = EventType.MILEAGE,
+                        title = "Odometer went backwards",
+                        detail = "Read ${"%,.0f".format(java.util.Locale.UK, miles)} miles, " +
+                            "having previously recorded " +
+                            "${"%,.0f".format(java.util.Locale.UK, (highest?.km ?: km) * 0.621371)} miles.\n\n" +
+                            "An odometer does not go backwards. The innocent explanations are a " +
+                            "replaced instrument cluster or engine ECU; the other one is that it " +
+                            "has been altered. Either way it is worth knowing about, and the car " +
+                            "cannot tell you — it stores the current number and no history.",
+                    ),
+                )
+                Log.w(TAG, "Odometer decreased for ${vehicle.key}: $km km")
+            }
+            MileageVerdict.FIRST -> garage.record(
+                vehicle.key,
+                VehicleHistoryEvent(
+                    timestamp = now,
+                    type = EventType.MILEAGE,
+                    title = "${"%,.0f".format(java.util.Locale.UK, miles)} miles",
+                    detail = "First odometer reading recorded for this car. Later readings are " +
+                        "compared against it.",
+                ),
+            )
+            MileageVerdict.CONSISTENT -> Unit
+        }
     }
 
     /** Reads one PID immediately, outside the polling rotation. */
@@ -926,6 +987,9 @@ class ObdRepository(
          * throttle the last digit moves.
          */
         private const val MAX_SATURATED_READS = 20
+
+        /** Odometer, added to the standard in a later revision and rare before about 2018. */
+        const val PID_ODOMETER = 0xA6
 
         /**
          * Parameters that change over minutes rather than moments.

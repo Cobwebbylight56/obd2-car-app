@@ -7,6 +7,7 @@ import com.rhys.obd2.Obd2App
 import com.rhys.obd2.data.ConnectionState
 import com.rhys.obd2.data.DiagnosticReport
 import com.rhys.obd2.data.ObdForegroundService
+import com.rhys.obd2.data.Garage
 import com.rhys.obd2.data.ObdRepository
 import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.obd.PidRegistry
@@ -284,6 +285,25 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     // -----------------------------------------------------------------------------
     // Garage
     // -----------------------------------------------------------------------------
+
+    /**
+     * Whether this car has ever reported an odometer lower than one already recorded.
+     *
+     * Only ever true for readings taken by this app. A rollback that happened before you
+     * first plugged in leaves nothing on the OBD-II port to find — the car reports a
+     * current value and keeps no history of it.
+     */
+    fun odometerWentBackwards(): Boolean {
+        val key = currentVehicle.value?.key ?: return false
+        val readings = repository.garage.odometerHistory(key)
+        if (readings.size < 2) return false
+        var highest = readings.first().km
+        readings.drop(1).forEach { reading ->
+            if (reading.km < highest - Garage.ODOMETER_TOLERANCE_KM) return true
+            if (reading.km > highest) highest = reading.km
+        }
+        return false
+    }
 
     fun setVehicleModel(key: String, modelId: String?) {
         repository.garage.setModel(key, modelId)

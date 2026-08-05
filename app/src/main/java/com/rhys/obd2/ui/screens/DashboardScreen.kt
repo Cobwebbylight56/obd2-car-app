@@ -52,6 +52,9 @@ import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.theme.colors
+import com.rhys.obd2.ui.components.ExplainerCard
+import com.rhys.obd2.ui.theme.NumericMedium
+import androidx.compose.runtime.remember
 
 @Composable
 fun DashboardScreen(
@@ -67,6 +70,8 @@ fun DashboardScreen(
     val codes by viewModel.dtcs.collectAsState()
     val logging by viewModel.isLogging.collectAsState()
     val trip by viewModel.tripStats.collectAsState()
+    val vehicle by viewModel.currentVehicle.collectAsState()
+    val rollback = remember(vehicle?.key) { viewModel.odometerWentBackwards() }
 
     // Polling belongs to whichever screen is showing, so leaving the dashboard hands the
     // adapter back rather than competing with the next screen's requests.
@@ -112,6 +117,14 @@ fun DashboardScreen(
                     RecordButton(logging, viewModel)
                 }
             }
+        }
+
+        item(span = { GridItemSpan(2) }) {
+            OdometerHeader(
+                km = live[0xA6]?.primary?.value,
+                units = units,
+                rollback = rollback,
+            )
         }
 
         if (codes != null && codes!!.stored.isNotEmpty()) {
@@ -367,6 +380,71 @@ private fun NotConnected(onOpenConnect: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.clickable(onClick = onOpenConnect),
             )
+        }
+    }
+}
+
+/**
+ * The odometer, pinned above everything else.
+ *
+ * Not one of the gauges. A dial is for a value that moves while you watch it; total
+ * distance is a fact about the car, read once and then stable, and it belongs with the
+ * car's identity rather than in a grid of needles.
+ *
+ * Most cars will show nothing here, and the card says so rather than sitting blank. The
+ * odometer only reached the standard in a later revision and is rare on anything built
+ * before roughly 2018 — every car this app was written for will come up empty.
+ */
+@Composable
+private fun OdometerHeader(km: Double?, units: UnitSystem, rollback: Boolean) {
+    val converted = km?.let { Units.convert(it, "km", units) }
+
+    SectionCard(
+        title = "Odometer",
+        trailing = {
+            when {
+                rollback -> StatusPill("Went backwards", Tone.DANGER)
+                converted != null -> StatusPill("Recorded", Tone.ACCENT)
+                else -> StatusPill("Not reported", Tone.NEUTRAL)
+            }
+        },
+    ) {
+        Column {
+            if (converted != null) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "%,.0f".format(java.util.Locale.UK, converted.value),
+                        style = NumericMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        converted.unit,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 2.dp),
+                    )
+                }
+            } else {
+                Text(
+                    "This car doesn't report its odometer over OBD-II. The parameter was " +
+                        "added to the standard late and is uncommon on anything built before " +
+                        "about 2018.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (rollback) {
+                Spacer(Modifier.height(8.dp))
+                ExplainerCard(
+                    tone = Tone.DANGER,
+                    text = "A reading recorded for this car was lower than one taken earlier. " +
+                        "An odometer does not run backwards. A replaced instrument cluster or " +
+                        "ECU explains it innocently; so does tampering. The dates are in the " +
+                        "Garage history.",
+                )
+            }
         }
     }
 }

@@ -15,8 +15,26 @@ enum class EventType(val label: String) {
     CODES_CLEARED("Codes cleared"),
     ABNORMAL("Unusual reading"),
     TRIP("Trip recorded"),
+    MILEAGE("Mileage"),
     NOTE("Note"),
 }
+
+/** What a new odometer reading says about the ones before it. */
+enum class MileageVerdict {
+    /** First reading for this car, so there is nothing to compare against yet. */
+    FIRST,
+
+    /** Same or higher than last time, as it should be. */
+    CONSISTENT,
+
+    /**
+     * Lower than a reading already recorded. Barring a replaced instrument cluster or
+     * ECU, an odometer does not go backwards.
+     */
+    WENT_BACKWARDS,
+}
+
+data class MileageReading(val timestamp: Long, val km: Double)
 
 /** One dated entry in a vehicle's history. */
 data class VehicleHistoryEvent(
@@ -228,6 +246,55 @@ class Garage(private val context: Context) {
         File(directory(key), EVENTS_FILE).takeIf { it.exists() }?.delete() ?: true
     }.onFailure { Log.e(TAG, "Could not clear history", it) }.getOrDefault(false)
 
+    /**
+     * Records an odometer reading and says whether it is consistent with what came before.
+     *
+     * The check is deliberately narrow, because the useful version of this question and the
+     * answerable version are not the same one. What this can prove is that the reading went
+     * down *while the app was watching*: readings are kept outside the car with the dates
+     * they were taken, so a later one that is lower than an earlier one is evidence, and
+     * evidence the car itself no longer holds.
+     *
+     * What it cannot do is tell you anything about a rollback that happened before you
+     * first plugged in — which is the case that matters when buying. Nothing on the OBD-II
+     * port can: generic mode 01 exposes the current value and no history, and a competent
+     * rollback rewrites every module that stores one. For a car's past, the MOT history at
+     * gov.uk is the real tool, and it is free.
+     */
+    fun recordOdometer(key: String, km: Double): MileageVerdict {
+        val previous = odometerHistory(key)
+        val highest = previous.maxByOrNull { it.km }
+
+        val file = File(directory(key), ODOMETER_FILE)
+        runCatching {
+            file.parentFile?.mkdirs()
+            file.appendText("${System.currentTimeMillis()}\t$km\n")
+        }.onFailure { Log.e(TAG, "Could not record odometer", it) }
+
+        return when {
+            highest == null -> MileageVerdict.FIRST
+            // A small tolerance, because the reading has 0.1 km resolution and a car can be
+            // reversed. Anything beyond that is not rounding.
+            km < highest.km - ODOMETER_TOLERANCE_KM -> MileageVerdict.WENT_BACKWARDS
+            else -> MileageVerdict.CONSISTENT
+        }
+    }
+
+    /** Every odometer reading taken for this car, oldest first. */
+    fun odometerHistory(key: String): List<MileageReading> {
+        val file = File(directory(key), ODOMETER_FILE)
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            file.readLines().mapNotNull { line ->
+                val parts = line.split('\t')
+                if (parts.size < 2) return@mapNotNull null
+                val at = parts[0].toLongOrNull() ?: return@mapNotNull null
+                val km = parts[1].toDoubleOrNull() ?: return@mapNotNull null
+                MileageReading(at, km)
+            }
+        }.getOrDefault(emptyList())
+    }
+
     /** Remembers the code set so a repeated read doesn't log the same thing again. */
     fun updateLastCodes(key: String, codes: Set<String>) {
         val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
@@ -322,6 +389,15 @@ class Garage(private val context: Context) {
         private const val TAG = "Garage"
         private const val VEHICLE_FILE = "vehicle.txt"
         private const val EVENTS_FILE = "events.log"
+        private const val ODOMETER_FILE = "odometer.log"
+
+        /**
+         * How far a reading may fall below the highest seen before it counts as backwards.
+         *
+         * The PID has 0.1 km resolution and a car can genuinely be reversed onto a drive,
+         * so a hundred metres of slack costs nothing. A rollback is measured in thousands.
+         */
+        internal const val ODOMETER_TOLERANCE_KM = 0.5
 
         /** Tab-separated, with the separators escaped so a detail can contain anything. */
         internal fun encode(event: VehicleHistoryEvent): String = listOf(
