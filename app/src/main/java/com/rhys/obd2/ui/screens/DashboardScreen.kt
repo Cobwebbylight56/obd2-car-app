@@ -72,6 +72,13 @@ fun DashboardScreen(
     val trip by viewModel.tripStats.collectAsState()
     val vehicle by viewModel.currentVehicle.collectAsState()
     val rollback = remember(vehicle?.key) { viewModel.odometerWentBackwards() }
+    val supported by viewModel.supportedPids.collectAsState()
+    val loadEstimate by viewModel.loadEstimate.collectAsState()
+
+    // Substituted, not added alongside. Two load gauges side by side, one real and one
+    // derived, is a puzzle rather than a dashboard.
+    val realLoadMissing = supported.isNotEmpty() && 0x04 !in supported ||
+        live[PidRegistry.ESTIMATED_LOAD] != null && live[0x04] == null
 
     // Polling belongs to whichever screen is showing, so leaving the dashboard hands the
     // adapter back rather than competing with the next screen's requests.
@@ -139,10 +146,40 @@ fun DashboardScreen(
             }
         }
 
-        val gaugePids = dashboardPids.mapNotNull { PidRegistry[it] }
+        val gaugePids = dashboardPids
+            .map { if (it == 0x04 && realLoadMissing) PidRegistry.ESTIMATED_LOAD else it }
+            .mapNotNull { PidRegistry[it] }
         items(gaugePids, key = { it.id }) { pid ->
             val value = live[pid.id]
-            GaugeTile(pid, value?.primary?.value, value?.history ?: emptyList(), units)
+            GaugeTile(
+                pid = pid,
+                rawValue = value?.primary?.value,
+                history = value?.history ?: emptyList(),
+                units = units,
+                // Said on the tile rather than by deleting it. A gauge that vanishes looks
+                // like the app losing something; a gauge that says the car doesn't report
+                // it is the actual answer, and it comes back on a car that does.
+                unsupported = supported.isNotEmpty() && pid.id <= 0xFF && pid.id !in supported,
+                footnote = if (pid.id == PidRegistry.ESTIMATED_LOAD) {
+                    loadEstimate?.let { "${it.confidence.label} — ${it.basis}" }
+                } else {
+                    null
+                },
+            )
+        }
+
+        if (live[PidRegistry.ESTIMATED_LOAD] != null) {
+            item(span = { GridItemSpan(2) }) {
+                ExplainerCard(
+                    tone = Tone.INFO,
+                    text = "This car's ECU doesn't report engine load, so the app works one out " +
+                        "from airflow and engine speed, learning this engine's maximum as you " +
+                        "drive. It is a estimate, not the ECU's own figure, and it means less " +
+                        "on a diesel — a diesel runs unthrottled and breathes much the same at " +
+                        "a given speed whatever it is doing, so this reads more as effort than " +
+                        "as true load.",
+                )
+            }
         }
 
         item(span = { GridItemSpan(2) }) {
@@ -162,6 +199,8 @@ private fun GaugeTile(
     rawValue: Double?,
     history: List<Float>,
     units: UnitSystem,
+    unsupported: Boolean = false,
+    footnote: String? = null,
 ) {
     val converted = rawValue?.let { Units.convert(it, pid.unit, units) }
     val displayUnit = converted?.unit ?: Units.convert(0.0, pid.unit, units).unit
@@ -191,6 +230,24 @@ private fun GaugeTile(
                 optimalRange = optimalRange(pid.id),
                 modifier = Modifier.fillMaxWidth(),
             )
+            footnote?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                )
+            }
+            if (unsupported) {
+                Text(
+                    "Not reported by this car",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                )
+            }
             if (history.size > 2) {
                 Sparkline(
                     points = history,

@@ -167,6 +167,11 @@ class ObdRepository(
     val garage = Garage(context)
 
     private val abnormalMonitor = AbnormalReadingMonitor()
+    private val loadEstimator = LoadEstimator()
+
+    /** The estimate's confidence and inputs, for the tile to state alongside the number. */
+    private val _loadEstimate = MutableStateFlow<LoadEstimator.Estimate?>(null)
+    val loadEstimate: StateFlow<LoadEstimator.Estimate?> = _loadEstimate.asStateFlow()
 
     /** The car currently plugged in, once it has been identified. */
     private val _currentVehicle = MutableStateFlow<Vehicle?>(null)
@@ -316,6 +321,8 @@ class ObdRepository(
         unsupportedPids.clear()
         saturatedCounts.clear()
         odometerRecorded = false
+        loadEstimator.reset()
+        _loadEstimate.value = null
         failureCounts.clear()
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
@@ -356,13 +363,17 @@ class ObdRepository(
         _supportedPids.value = supported
         Log.i(TAG, "Car supports ${supported.size} PIDs")
 
-        // Keep the dashboard honest: drop anything the car doesn't actually have.
-        val requested = settings.dashboardPids.value
-        val usable = requested.filter { it in supported }
-        if (usable.size != requested.size) {
-            val replacements = PidRegistry.DEFAULT_DASHBOARD.filter { it in supported && it !in usable }
-            settings.setDashboardPids((usable + replacements).distinct().take(8))
-        }
+        // Deliberately does not touch the saved dashboard.
+        //
+        // It used to overwrite it here, dropping anything this car did not advertise. That
+        // destroys a preference to describe a fact about one vehicle: plug into a car that
+        // does not report battery voltage and the voltage gauge is deleted for good, from
+        // every car, with no way to tell it ever existed. It is also acting on a claim this
+        // very app distrusts elsewhere — the support bitmap over-reports, which is why a
+        // parameter can be advertised and answer nothing but padding.
+        //
+        // The supported set is published instead, and the dashboard uses it to say "not
+        // reported by this car" on a tile rather than removing it.
     }
 
     // ---------------------------------------------------------------------------------
@@ -551,6 +562,42 @@ class ObdRepository(
         }
 
         tripLogger.record(pidId, definition, readings, now)
+
+        // Only stands in when the car will not give a real one — either it never advertised
+        // the parameter, or it advertised it and answers nothing but padding.
+        val realLoadMissing = PID_LOAD in unsupportedPids ||
+            (_supportedPids.value.isNotEmpty() && PID_LOAD !in _supportedPids.value)
+        if (realLoadMissing && pidId in setOf(PID_MAF, PID_RPM, PID_THROTTLE)) {
+            updateLoadEstimate(now)
+        }
+    }
+
+    /**
+     * Publishes a derived load figure under its own name.
+     *
+     * Never written to [PID_LOAD]. A calculated number and a reported one must not share a
+     * gauge, or there is no way to tell which is on screen — and this one carries caveats
+     * the ECU's own figure does not.
+     */
+    private fun updateLoadEstimate(now: Long) {
+        val values = _liveData.value
+        val estimate = loadEstimator.fromAirflow(
+            mafGramsPerSecond = values[PID_MAF]?.primary?.value,
+            rpm = values[PID_RPM]?.primary?.value,
+        ) ?: loadEstimator.fromThrottle(values[PID_THROTTLE]?.primary?.value)
+        ?: return
+
+        _loadEstimate.value = estimate
+        val pid = PidRegistry[PidRegistry.ESTIMATED_LOAD] ?: return
+        val reading = Reading(pid.name, estimate.percent, "%")
+
+        _liveData.update { current ->
+            val previous = current[PidRegistry.ESTIMATED_LOAD]
+            val history = ((previous?.history ?: emptyList()) + estimate.percent.toFloat())
+                .takeLast(HISTORY_POINTS)
+            current + (PidRegistry.ESTIMATED_LOAD to
+                LiveValue(PidRegistry.ESTIMATED_LOAD, listOf(reading), now, history))
+        }
     }
 
     /**
@@ -990,6 +1037,10 @@ class ObdRepository(
 
         /** Odometer, added to the standard in a later revision and rare before about 2018. */
         const val PID_ODOMETER = 0xA6
+        const val PID_LOAD = 0x04
+        const val PID_MAF = 0x10
+        const val PID_RPM = 0x0C
+        const val PID_THROTTLE = 0x11
 
         /**
          * Parameters that change over minutes rather than moments.

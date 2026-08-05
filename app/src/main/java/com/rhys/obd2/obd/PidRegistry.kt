@@ -289,6 +289,9 @@ object PidRegistry {
         add(Pid(0x30, "Warm-ups since codes cleared", "", 0.0, 255.0, 1, PidCategory.EMISSIONS) {
             one(it.a().toDouble())
         })
+        add(Pid(ESTIMATED_LOAD, "Engine load (estimated)", "%", 0.0, 100.0, 0, PidCategory.ENGINE) {
+            one(it.a().toDouble())
+        })
         add(Pid(0xA6, "Odometer", "km", 0.0, 429496729.5, 4, PidCategory.SPEED, featured = true) {
             val raw = (it[0].toLong() shl 24) or (it[1].toLong() shl 16) or (it[2].toLong() shl 8) or it[3].toLong()
             one(raw / 10.0)
@@ -497,11 +500,20 @@ object PidRegistry {
     /** PIDs shown on the dashboard when the user hasn't chosen their own set. */
     val DEFAULT_DASHBOARD = listOf(0x0C, 0x0D, 0x05, 0x04, 0x11, 0x42)
 
+    /**
+     * A load figure worked out by the app, for cars whose ECU does not provide one.
+     *
+     * Outside the 0x00–0xFF range on purpose: it is not a parameter, it is a calculation,
+     * and it must never end up in a request to the car.
+     */
+    const val ESTIMATED_LOAD = 0x1004
+
     /** The support-bitmap PIDs, which are polled to discover what the car implements. */
     val SUPPORT_PIDS = listOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0)
 
     /** Bitmaps and other PIDs that make no sense as a live gauge. */
-    fun isPollable(id: Int): Boolean = id !in SUPPORT_PIDS && id != 0x01 && id != 0x02
+    fun isPollable(id: Int): Boolean =
+        id <= 0xFF && id !in SUPPORT_PIDS && id != 0x01 && id != 0x02
 
     private fun sensorLabel(index: Int): String {
         val bank = index / 4 + 1
