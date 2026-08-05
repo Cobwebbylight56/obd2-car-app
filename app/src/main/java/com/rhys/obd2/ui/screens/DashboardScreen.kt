@@ -177,7 +177,10 @@ fun DashboardScreen(
                 // it is the actual answer, and it comes back on a car that does.
                 unsupported = supported.isNotEmpty() && pid.id <= 0xFF && pid.id !in supported,
                 footnote = if (pid.id == PidRegistry.ESTIMATED_LOAD) {
+                    // Never blank. An empty derived gauge is indistinguishable from the
+                    // broken reading it replaced, so it says what it is waiting for.
                     loadEstimate?.let { "${it.confidence.label} — ${it.basis}" }
+                        ?: "Waiting for airflow or throttle"
                 } else {
                     null
                 },

@@ -421,7 +421,8 @@ class ObdRepository(
                 }
                 retiredAt.keys.removeAll { it !in deadPids }
 
-                val active = pollTargets.filter { it !in deadPids && it !in unsupportedPids }
+                val active = withLoadInputs(pollTargets)
+                    .filter { it !in deadPids && it !in unsupportedPids }
                 if (active.isEmpty()) {
                     delay(1000)
                     continue
@@ -565,11 +566,34 @@ class ObdRepository(
 
         // Only stands in when the car will not give a real one — either it never advertised
         // the parameter, or it advertised it and answers nothing but padding.
-        val realLoadMissing = PID_LOAD in unsupportedPids ||
-            (_supportedPids.value.isNotEmpty() && PID_LOAD !in _supportedPids.value)
-        if (realLoadMissing && pidId in setOf(PID_MAF, PID_RPM, PID_THROTTLE)) {
+        if (realLoadMissing() && pidId in LOAD_INPUTS) {
             updateLoadEstimate(now)
         }
+    }
+
+    /** True once it is settled that this car will not report a calculated load itself. */
+    private fun realLoadMissing(): Boolean {
+        val known = _supportedPids.value
+        return PID_LOAD in unsupportedPids || (known.isNotEmpty() && PID_LOAD !in known)
+    }
+
+    /**
+     * Adds what the load estimate is derived from, when the estimate is what will be shown.
+     *
+     * The gauge is derived from airflow, engine speed and throttle, and the driver has no
+     * reason to know that — they pinned "engine load" and expect a number. Without this the
+     * estimate has no inputs unless those three happen to be pinned as well, so the
+     * substitute gauge sat at nothing, which looks exactly like the broken load reading it
+     * exists to replace.
+     *
+     * Applied per pass rather than when polling starts, because a car can advertise load
+     * and then answer nothing but padding — that is only discovered minutes in, long after
+     * the target list was fixed.
+     */
+    private fun withLoadInputs(pids: List<Int>): List<Int> {
+        if (PID_LOAD !in pids || !realLoadMissing()) return pids
+        val known = _supportedPids.value
+        return (pids + LOAD_INPUTS.filter { known.isEmpty() || it in known }).distinct()
     }
 
     /**
@@ -1041,6 +1065,15 @@ class ObdRepository(
         const val PID_MAF = 0x10
         const val PID_RPM = 0x0C
         const val PID_THROTTLE = 0x11
+
+        /**
+         * What a derived load figure is worked out from, best first.
+         *
+         * Airflow and engine speed give a real answer; throttle position alone gives a
+         * shape. All three are polled when the estimate is in use, because which of them
+         * the car will actually answer is not known until it has been asked.
+         */
+        private val LOAD_INPUTS = listOf(PID_MAF, PID_RPM, PID_THROTTLE)
 
         /**
          * Parameters that change over minutes rather than moments.
