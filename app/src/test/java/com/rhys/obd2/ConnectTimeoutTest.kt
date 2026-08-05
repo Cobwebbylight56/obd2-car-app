@@ -52,16 +52,25 @@ class ConnectTimeoutTest {
 
     private class SocketTimeout(afterMs: Long) : IOException("timed out after $afterMs")
 
+    /**
+     * The same shape as the transport's own, including the detail that made this test
+     * flaky: the watchdog announces the timeout with a flag it sets before closing, not
+     * with its own liveness. Closing wakes the blocked thread immediately, and that thread
+     * could reach the check while the watchdog coroutine was still winding down — reporting
+     * a refused connection for what was really a timeout, roughly one run in a hundred.
+     */
     private suspend fun connectWithin(sock: FakeSocket, timeoutMs: Long) {
         coroutineScope {
+            val timedOut = AtomicBoolean(false)
             val watchdog = launch(Dispatchers.IO) {
                 delay(timeoutMs)
+                timedOut.set(true)
                 runCatching { sock.close() }
             }
             try {
                 runInterruptible(Dispatchers.IO) { sock.connect() }
             } catch (e: IOException) {
-                if (!watchdog.isActive) throw SocketTimeout(timeoutMs) else throw e
+                if (timedOut.get()) throw SocketTimeout(timeoutMs) else throw e
             } finally {
                 watchdog.cancel()
             }
@@ -79,6 +88,20 @@ class ConnectTimeoutTest {
         assertTrue("should have reported a timeout, got $error", error is SocketTimeout)
         assertTrue("should give up near the deadline, took ${elapsed}ms", elapsed < 3_000)
         assertTrue("the socket must be closed to break the blocking call", sock.closed.get())
+    }
+
+    @Test
+    fun `a timeout is reported as a timeout every single time`() = runBlocking {
+        // The flake this test used to be. Distinguishing a timeout from a refusal by asking
+        // whether the watchdog was still running is a race, and a race that loses rarely is
+        // worse than one that loses often: it passes review, passes CI, and then misreports
+        // the one failure the driver is actually looking at. Thirty runs at a short deadline
+        // is enough to make the old version fail reliably.
+        repeat(30) { run ->
+            val sock = FakeSocket(succeedAfterMs = null)
+            val error = runCatching { connectWithin(sock, timeoutMs = 40) }.exceptionOrNull()
+            assertTrue("run $run reported $error rather than a timeout", error is SocketTimeout)
+        }
     }
 
     @Test

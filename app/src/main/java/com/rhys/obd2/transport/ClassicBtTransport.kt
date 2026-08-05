@@ -11,6 +11,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -152,17 +153,27 @@ class ClassicBtTransport(
      */
     private suspend fun connectWithin(sock: BluetoothSocket, timeoutMs: Long) {
         coroutineScope {
+            // A close from the watchdog surfaces below as a generic IO failure,
+            // indistinguishable from the adapter refusing the connection, so the watchdog
+            // has to say so itself.
+            //
+            // It says so with a flag rather than with its own liveness, and the flag is set
+            // *before* the close. Asking whether the watchdog was still active is a race it
+            // loses about one time in a hundred: closing the socket wakes the blocked thread
+            // immediately, and that thread can reach the check while the watchdog coroutine
+            // is still winding down — reporting a refusal for what was really a timeout, and
+            // sending the driver to the wrong half of the troubleshooting advice.
+            val timedOut = AtomicBoolean(false)
             val watchdog = launch(Dispatchers.IO) {
                 delay(timeoutMs)
+                timedOut.set(true)
                 // The only lever that works. connect() is not interruptible.
                 runCatching { sock.close() }
             }
             try {
                 runInterruptible(Dispatchers.IO) { sock.connect() }
             } catch (e: IOException) {
-                // A close from the watchdog surfaces here as a generic IO failure, so the
-                // watchdog's own state is what distinguishes a timeout from a refusal.
-                if (!watchdog.isActive) throw SocketTimeout(timeoutMs) else throw e
+                if (timedOut.get()) throw SocketTimeout(timeoutMs) else throw e
             } finally {
                 watchdog.cancel()
             }
