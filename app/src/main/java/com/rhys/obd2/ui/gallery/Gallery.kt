@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -100,6 +99,7 @@ object Gallery {
         containers()
         readouts()
         structure()
+        actionRows()
         emptyStates()
     }
 
@@ -404,6 +404,48 @@ object Gallery {
         add(
             GalleryEntry(
                 group = "Readouts",
+                name = "gauge-tiles-as-on-the-dashboard",
+                notes = "Two across, the width the dashboard actually uses, with the longest " +
+                    "labels in the app. This is the case that was broken: the label used to " +
+                    "sit inside the ring, so a two-line one overlapped the arc. It also " +
+                    "checks that tiles line up when one label wraps and another doesn't.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    listOf(
+                        listOf(
+                            Triple("Calculated engine load", "100.0", "%"),
+                            Triple("Engine coolant temperature", "84.0", "°C"),
+                        ),
+                        listOf(
+                            Triple("Engine RPM", "816", "rpm"),
+                            Triple("Vehicle speed", "28", "mph"),
+                        ),
+                        listOf(
+                            Triple("Commanded equivalence ratio (lambda)", "0.994", "λ"),
+                            Triple("Odometer", "184320", "miles"),
+                        ),
+                    ).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                            row.forEach { (name, value, unit) ->
+                                Box(Modifier.weight(1f)) {
+                                    SectionCard {
+                                        Gauge(
+                                            value = 62f, min = 0f, max = 100f,
+                                            label = name, unit = unit, valueText = value,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        add(
+            GalleryEntry(
+                group = "Readouts",
                 name = "gauge-thresholds",
                 notes = "The same gauge below, at and above its warning and danger " +
                     "thresholds. These states are hard to reach in a healthy car and so are " +
@@ -416,7 +458,7 @@ object Gallery {
                                 value = v, min = -40f, max = 130f,
                                 label = "Coolant temperature", unit = "°C", valueText = text,
                                 warningThreshold = 105f, dangerThreshold = 115f,
-                                modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
@@ -446,7 +488,7 @@ object Gallery {
                                         label = "Coolant temperature", unit = "°C", valueText = text,
                                         warningThreshold = 105f, dangerThreshold = 115f,
                                         optimalRange = 82f..105f,
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
                                 }
                             }
@@ -469,7 +511,7 @@ object Gallery {
                             Gauge(
                                 value = v, min = 0f, max = 100f,
                                 label = "Engine load", unit = "%", valueText = text,
-                                modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
@@ -489,7 +531,7 @@ object Gallery {
                         Gauge(
                             value = 0f, min = 0f, max = 7000f,
                             label = "Engine speed", unit = "rpm", valueText = "—",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Box(Modifier.weight(1f)) {
@@ -497,14 +539,14 @@ object Gallery {
                             value = 7000f, min = 0f, max = 7000f,
                             label = "Engine speed", unit = "rpm", valueText = "7000",
                             warningThreshold = 5500f, dangerThreshold = 6500f,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Box(Modifier.weight(1f)) {
                         Gauge(
                             value = 0.42f, min = 0f, max = 1f,
                             label = "Commanded equivalence ratio", unit = "", valueText = "0.42",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -533,6 +575,44 @@ object Gallery {
     // -----------------------------------------------------------------------------------
     // Structure
     // -----------------------------------------------------------------------------------
+
+    private fun MutableList<GalleryEntry>.actionRows() {
+        add(
+            GalleryEntry(
+                group = "Structure",
+                name = "action-row-three-buttons",
+                notes = "Three actions abreast, which is what broke: after an icon and " +
+                    "Material's padding, a third of the width left about thirty points for " +
+                    "the label and \"Report\" wrapped, stranding its last letter on a second " +
+                    "line. Rendered at 320dp as well as full width, because the narrower " +
+                    "phone is where it shows first.",
+                width = 320.dp,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    Text("Wrong — three abreast", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                        listOf("Read codes", "Report", "Clear").forEach { text ->
+                            OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) {
+                                Text(text)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(Space.sm))
+                    Text("Right — primary full width", style = MaterialTheme.typography.labelMedium)
+                    Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                        Text("Read codes", maxLines = 1)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                        listOf("Report", "Clear").forEach { text ->
+                            OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) {
+                                Text(text, maxLines = 1, softWrap = false)
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    }
 
     private fun MutableList<GalleryEntry>.structure() {
         add(

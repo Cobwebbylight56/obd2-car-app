@@ -176,9 +176,7 @@ private fun GaugeTile(
                 warningThreshold = warn,
                 dangerThreshold = danger,
                 optimalRange = optimalRange(pid.id),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.15f),
+                modifier = Modifier.fillMaxWidth(),
             )
             if (history.size > 2) {
                 Sparkline(

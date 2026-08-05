@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rhys.obd2.ui.theme.Motion
 import com.rhys.obd2.ui.theme.NumericLarge
+import com.rhys.obd2.ui.theme.NumericMedium
 import com.rhys.obd2.ui.theme.Radius
 import com.rhys.obd2.ui.theme.Space
 import com.rhys.obd2.ui.theme.Tone
@@ -185,61 +187,88 @@ fun Gauge(
         }
     }
 
-    Box(
+    // The label sits below the dial, not inside it.
+    //
+    // Inside, it collided with the arc. The text block is centred in the same box the arc
+    // is drawn in, so a two-line label — "Calculated engine load", "Engine coolant
+    // temperature" — grows past the space enclosed by the ring and overlaps the stroke.
+    // No amount of padding fixes that, because the available height depends on the label's
+    // own height: the more room it needs, the further it spills. Putting it outside the
+    // circle removes the conflict rather than tuning it.
+    Column(
         modifier = modifier.semantics(mergeDescendants = true) { contentDescription = spoken },
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = size.minDimension * 0.09f
-            val inset = stroke / 2f + 2f
-            val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
-            val topLeft = Offset(inset, inset)
-
-            // 240° of sweep starting at 150°, which puts the gap symmetrically at the bottom.
-            drawArc(
-                color = track,
-                startAngle = 150f,
-                sweepAngle = 240f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-            drawArc(
-                color = animatedColour,
-                startAngle = 150f,
-                sweepAngle = 240f * animated,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-        }
-
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.clearAndSetSemantics { },
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.15f)
+                .clearAndSetSemantics { },
+            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = valueText,
-                style = NumericLarge,
-                color = onSurface,
-                maxLines = 1,
-            )
-            if (unit.isNotEmpty()) {
-                Text(unit, style = MaterialTheme.typography.labelSmall, color = dim, maxLines = 1)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val stroke = size.minDimension * 0.09f
+                val inset = stroke / 2f + 2f
+                val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+                val topLeft = Offset(inset, inset)
+
+                // 240° of sweep starting at 150°, which puts the gap symmetrically at the
+                // bottom.
+                drawArc(
+                    color = track,
+                    startAngle = 150f,
+                    sweepAngle = 240f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                drawArc(
+                    color = animatedColour,
+                    startAngle = 150f,
+                    sweepAngle = 240f * animated,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
             }
-            Spacer(Modifier.height(Space.xxs))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = dim,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = Space.md),
-            )
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = valueText,
+                    // An odometer reading is six digits and a lambda value is four
+                    // characters plus a point; at one size the long ones would push
+                    // through the ring horizontally instead of vertically.
+                    style = if (valueText.length >= 5) NumericMedium else NumericLarge,
+                    color = onSurface,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
+                if (unit.isNotEmpty()) {
+                    Text(
+                        unit,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = dim,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
+
+        Spacer(Modifier.height(Space.xs))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = dim,
+            // Two lines are reserved whether or not they are used, so a grid of gauges
+            // lines up instead of each tile ending wherever its own label happens to.
+            minLines = 2,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

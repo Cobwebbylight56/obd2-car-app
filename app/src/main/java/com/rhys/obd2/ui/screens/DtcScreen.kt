@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -115,38 +116,54 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            // Reading codes is the primary action and gets the full width; report and
+            // clear share the row below.
+            //
+            // All three abreast could not work. After a leading icon and Material's own
+            // button padding, a third of a phone's width leaves roughly thirty points for
+            // the label — so "Report" wrapped, stranding its final letter on a second
+            // line. Squeezing the text would have been treating the symptom; these are not
+            // three equal actions, and laying them out as though they were is what created
+            // the problem.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { viewModel.refreshDtcs() },
                     enabled = busy == null,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Read codes")
+                    Spacer(Modifier.width(8.dp))
+                    Text("Read codes", maxLines = 1)
                 }
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            viewModel.saveReport()?.let { shareReport(context, it) }
-                        }
-                    },
-                    enabled = busy == null,
-                    modifier = Modifier.weight(1f),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(Icons.Filled.Share, contentDescription = null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Report")
-                }
-                OutlinedButton(
-                    onClick = { confirmClear = true },
-                    enabled = busy == null && (snapshot?.stored?.isNotEmpty() == true || snapshot?.pending?.isNotEmpty() == true),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Tone.DANGER.color()),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Filled.DeleteSweep, contentDescription = null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Clear")
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                viewModel.saveReport()?.let { shareReport(context, it) }
+                            }
+                        },
+                        enabled = busy == null,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Report", maxLines = 1, softWrap = false)
+                    }
+                    OutlinedButton(
+                        onClick = { confirmClear = true },
+                        enabled = busy == null && (snapshot?.stored?.isNotEmpty() == true || snapshot?.pending?.isNotEmpty() == true),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Tone.DANGER.color()),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Clear", maxLines = 1, softWrap = false)
+                    }
                 }
             }
         }
