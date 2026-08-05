@@ -61,6 +61,7 @@ import kotlinx.coroutines.launch
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.components.ScreenHeader
+import com.rhys.obd2.obd.KnownIssues
 
 @Composable
 fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
@@ -201,7 +202,7 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
                     }
                     // Sorted worst-first so the code that matters is the one you see.
                     for (dtc in codes.sortedBy { it.severity.ordinal }) {
-                        item(key = "${status.name}-${dtc.code}") { DtcCard(dtc) }
+                        item(key = "${status.name}-${dtc.code}") { DtcCard(dtc, viewModel) }
                     }
                 }
             }
@@ -224,9 +225,19 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
 }
 
 @Composable
-private fun DtcCard(dtc: Dtc) {
+private fun DtcCard(dtc: Dtc, viewModel: ObdViewModel) {
     var expanded by remember { mutableStateOf(false) }
     val tone = severityTone(dtc.severity)
+
+    // Two things the car itself cannot tell you.
+    //
+    // How often this code has happened before, which the ECU forgets the moment codes are
+    // cleared; and what it usually turns out to be on this particular model, which the
+    // generic description never says.
+    val previous = remember(dtc.code) { viewModel.codeHistory(dtc.code) }
+    val known = remember(dtc.code) {
+        KnownIssues.issuesForCode(viewModel.currentModelId(), dtc.code)
+    }
 
     SectionCard(modifier = Modifier.clickable { expanded = !expanded }) {
         Column {
@@ -255,6 +266,10 @@ private fun DtcCard(dtc: Dtc) {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 StatusPill(dtc.severity.label, tone)
+                if (previous.size > 1) {
+                    Spacer(Modifier.width(6.dp))
+                    StatusPill("Seen ${previous.size}×", Tone.WARNING)
+                }
                 if (dtc.manufacturerSpecific) {
                     StatusPill("Maker-specific", Tone.INFO)
                 }
@@ -271,6 +286,32 @@ private fun DtcCard(dtc: Dtc) {
                     dtc.advice?.let {
                         Spacer(Modifier.height(8.dp))
                         ExplainerCard(text = it, tone = tone)
+                    }
+
+                    if (previous.size > 1) {
+                        Spacer(Modifier.height(8.dp))
+                        ExplainerCard(
+                            tone = Tone.WARNING,
+                            text = "This code has appeared ${previous.size} times on this car, " +
+                                "first on ${historyDate(previous.last())} and most recently on " +
+                                "${historyDate(previous.first())}.\n\n" +
+                                "A fault that keeps coming back after being cleared is a " +
+                                "different problem from one that has just appeared — usually it " +
+                                "means the cause was never addressed. The car cannot tell you " +
+                                "this: clearing codes wipes them from the ECU.",
+                        )
+                    }
+
+                    known.forEach { issue ->
+                        Spacer(Modifier.height(8.dp))
+                        ExplainerCard(
+                            tone = Tone.INFO,
+                            text = "On this model: ${issue.title.lowercase()} is a " +
+                                "${issue.confidence.label.lowercase()} cause of this code.\n\n" +
+                                issue.detail +
+                                (issue.typicalMileage?.let { "\n\nTypically appears around $it miles." } ?: "") +
+                                "\n\nCommonly reported, not a diagnosis of your car.",
+                        )
                     }
                     if (dtc.manufacturerSpecific) {
                         Spacer(Modifier.height(8.dp))
@@ -382,3 +423,6 @@ private fun shareReport(context: android.content.Context, file: java.io.File) {
     }
     context.startActivity(Intent.createChooser(intent, "Share diagnostic report"))
 }
+
+private fun historyDate(timestamp: Long): String =
+    java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.UK).format(java.util.Date(timestamp))

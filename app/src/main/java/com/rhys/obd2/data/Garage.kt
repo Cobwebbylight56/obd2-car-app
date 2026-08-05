@@ -40,6 +40,8 @@ data class Vehicle(
     val modelYear: String? = null,
     val firstSeen: Long = System.currentTimeMillis(),
     val lastSeen: Long = System.currentTimeMillis(),
+    /** Which entry in the known-issues list the owner picked, if any. */
+    val modelId: String? = null,
     /** Codes present at the last read, so a repeat read doesn't log a duplicate entry. */
     val lastCodes: Set<String> = emptySet(),
 ) {
@@ -148,6 +150,30 @@ class Garage(private val context: Context) {
     // -------------------------------------------------------------------------------
     // Mutation
     // -------------------------------------------------------------------------------
+
+    /** Records which model the owner says this is, for the known-issues notes. */
+    fun setModel(key: String, modelId: String?) {
+        val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
+        save(vehicle.copy(modelId = modelId))
+        refresh()
+    }
+
+    /**
+     * When a given fault code has been seen on this car.
+     *
+     * This is the thing a scan tool normally cannot tell you. Clearing codes wipes them
+     * from the ECU, so without a record kept outside the car there is no way to distinguish
+     * a fault that has come back four times from one that has just appeared — and that
+     * distinction is usually the whole diagnosis.
+     *
+     * Matched on the code appearing in the entry's title, which is how the codes are
+     * recorded. Newest first.
+     */
+    fun occurrencesOf(key: String, code: String): List<Long> =
+        events(key)
+            .filter { it.type == EventType.CODES_FOUND || it.type == EventType.CODES_CLEARED }
+            .filter { it.title.contains(code, ignoreCase = true) || it.detail.contains(code, ignoreCase = true) }
+            .map { it.timestamp }
 
     fun rename(key: String, name: String) {
         val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
@@ -259,6 +285,7 @@ class Garage(private val context: Context) {
                     appendLine("name=${escape(vehicle.name)}")
                     appendLine("manufacturer=${escape(vehicle.manufacturer.orEmpty())}")
                     appendLine("modelYear=${escape(vehicle.modelYear.orEmpty())}")
+                    appendLine("modelId=${escape(vehicle.modelId.orEmpty())}")
                     appendLine("firstSeen=${vehicle.firstSeen}")
                     appendLine("lastSeen=${vehicle.lastSeen}")
                     appendLine("lastCodes=${escape(vehicle.lastCodes.joinToString(","))}")
@@ -282,6 +309,7 @@ class Garage(private val context: Context) {
                 name = fields["name"]?.takeIf { it.isNotBlank() } ?: "My car",
                 manufacturer = fields["manufacturer"]?.takeIf { it.isNotBlank() },
                 modelYear = fields["modelYear"]?.takeIf { it.isNotBlank() },
+                modelId = fields["modelId"]?.takeIf { it.isNotBlank() },
                 firstSeen = fields["firstSeen"]?.toLongOrNull() ?: 0L,
                 lastSeen = fields["lastSeen"]?.toLongOrNull() ?: 0L,
                 lastCodes = fields["lastCodes"].orEmpty()

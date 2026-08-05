@@ -28,6 +28,13 @@ import kotlinx.coroutines.cancelAndJoin
  * survives configuration changes and navigation. This adds the things that are genuinely
  * view concerns — scan results, transient messages, which screen is polling what.
  */
+/** What a history export is written as. */
+enum class ExportFormat(val label: String, val detail: String, val mime: String) {
+    PDF("PDF", "Prints, and a garage will accept it", "application/pdf"),
+    TEXT("Text", "Pastes into an email or a message", "text/plain"),
+    CSV("Spreadsheet", "Opens in Excel or Sheets", "text/csv"),
+}
+
 class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app: Obd2App get() = getApplication()
@@ -277,6 +284,31 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     // -----------------------------------------------------------------------------
     // Garage
     // -----------------------------------------------------------------------------
+
+    fun setVehicleModel(key: String, modelId: String?) {
+        repository.garage.setModel(key, modelId)
+        historyRevision.value++
+    }
+
+    /** When this code has been seen on this car before. Newest first. */
+    fun codeHistory(code: String): List<Long> {
+        val key = currentVehicle.value?.key ?: return emptyList()
+        return repository.garage.occurrencesOf(key, code)
+    }
+
+    /** The model the owner picked for the connected car, for known-issue notes. */
+    fun currentModelId(): String? = currentVehicle.value?.modelId
+
+    fun exportHistory(key: String, format: ExportFormat): File? {
+        val vehicle = repository.garage.vehicle(key) ?: return null
+        val events = repository.garage.events(key)
+        val context = getApplication<Application>()
+        return when (format) {
+            ExportFormat.PDF -> com.rhys.obd2.data.HistoryExport.toPdf(context, vehicle, events)
+            ExportFormat.TEXT -> com.rhys.obd2.data.HistoryExport.toText(context, vehicle, events)
+            ExportFormat.CSV -> com.rhys.obd2.data.HistoryExport.toCsv(context, vehicle, events)
+        }
+    }
 
     fun deleteHistoryEvent(key: String, event: VehicleHistoryEvent) {
         repository.garage.deleteEvent(key, event)

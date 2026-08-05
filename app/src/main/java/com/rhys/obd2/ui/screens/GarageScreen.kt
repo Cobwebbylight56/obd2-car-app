@@ -64,6 +64,15 @@ import java.util.Locale
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.components.ScreenHeader
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.platform.LocalContext
+import com.rhys.obd2.obd.IssueConfidence
+import com.rhys.obd2.obd.KnownIssues
+import com.rhys.obd2.ui.ExportFormat
 
 /**
  * Per-car history that survives the car's own memory.
@@ -85,6 +94,9 @@ fun GarageScreen(viewModel: ObdViewModel) {
     var deleting by remember { mutableStateOf(false) }
     var clearingHistory by remember { mutableStateOf(false) }
     var deletingEvent by remember { mutableStateOf<VehicleHistoryEvent?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    var pickingModel by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val revision by viewModel.historyRevision.collectAsState()
 
     LazyColumn(
@@ -173,6 +185,32 @@ fun GarageScreen(viewModel: ObdViewModel) {
                     InfoRow("First seen", formatDate(vehicle.firstSeen))
                     InfoRow("Last seen", formatDate(vehicle.lastSeen))
                     InfoRow("History", "${events.size} entries · ${viewModel.historySize(vehicle.key)}")
+                    val model = vehicle.modelId?.let { KnownIssues.byId(it) }
+                    InfoRow("Model", model?.displayName ?: "Not set")
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { pickingModel = true },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.DirectionsCar, contentDescription = null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (model == null) "Set model" else "Change")
+                        }
+                        OutlinedButton(
+                            onClick = { exporting = true },
+                            enabled = events.isNotEmpty(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.Share, contentDescription = null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Export")
+                        }
+                    }
+
                     if (events.isNotEmpty()) {
                         TextButton(
                             onClick = { clearingHistory = true },
@@ -219,6 +257,28 @@ fun GarageScreen(viewModel: ObdViewModel) {
                     text = "Nothing recorded for this car yet. Fault codes, unusual readings and " +
                         "recorded trips will appear here as they happen.",
                 )
+            }
+        }
+
+        vehicle.modelId?.let { id ->
+            KnownIssues.byId(id)?.let { model ->
+                item {
+                    SectionCard(
+                        title = "Known issues",
+                        subtitle = model.displayName,
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ExplainerCard(
+                                tone = Tone.INFO,
+                                text = "Faults commonly reported on this model. These are not a " +
+                                    "diagnosis of your car and most of them set no fault code at " +
+                                    "all — corrosion, suspension and gearboxes are not " +
+                                    "emissions-related, so this app can never see them.",
+                            )
+                            model.issues.forEach { issue -> KnownIssueRow(issue) }
+                        }
+                    }
+                }
             }
         }
 
@@ -298,6 +358,27 @@ fun GarageScreen(viewModel: ObdViewModel) {
                 ) { Text("Clear history") }
             },
             dismissButton = { TextButton(onClick = { clearingHistory = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (pickingModel && selected != null) {
+        ModelPickerDialog(
+            current = selected.modelId,
+            onDismiss = { pickingModel = false },
+            onPick = { id ->
+                pickingModel = false
+                viewModel.setVehicleModel(selected.key, id)
+            },
+        )
+    }
+
+    if (exporting && selected != null) {
+        ExportDialog(
+            onDismiss = { exporting = false },
+            onPick = { format ->
+                exporting = false
+                viewModel.exportHistory(selected.key, format)?.let { shareHistory(context, it, format) }
+            },
         )
     }
 
@@ -489,3 +570,179 @@ private fun formatDate(millis: Long): String =
 
 private fun formatDateTime(millis: Long): String =
     SimpleDateFormat("d MMM yyyy, HH:mm", Locale.UK).format(Date(millis))
+
+@Composable
+private fun KnownIssueRow(issue: com.rhys.obd2.obd.KnownIssue) {
+    var expanded by remember { mutableStateOf(false) }
+    val tone = when (issue.confidence) {
+        IssueConfidence.WELL_DOCUMENTED -> Tone.WARNING
+        IssueConfidence.COMMON -> Tone.INFO
+        IssueConfidence.WORTH_CHECKING -> Tone.NEUTRAL
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { expanded = !expanded }
+            .padding(vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(issue.title, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            StatusPill(issue.confidence.label, tone)
+        }
+        Text(
+            issue.summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+
+        // Whether the app can see it at all is the first thing worth knowing, because most
+        // of what goes wrong with a car sets no emissions code.
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (issue.detectableOverObd) {
+                StatusPill("Sets a code", Tone.ACCENT)
+            } else {
+                StatusPill("No code — inspect", Tone.NEUTRAL)
+            }
+            issue.typicalMileage?.let { StatusPill(it, Tone.NEUTRAL) }
+        }
+
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(top = 8.dp)) {
+                Text(issue.detail, style = MaterialTheme.typography.bodySmall)
+                if (issue.codes.isNotEmpty()) {
+                    Text(
+                        "Codes: ${issue.codes.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                Text(
+                    issue.confidence.explanation,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Picks the model, so the known-issue notes have something to key on.
+ *
+ * Deliberately a manual choice rather than an attempt to work it out from the VIN. Decoding
+ * a VIN past the manufacturer is manufacturer-specific and unreliable, and plenty of older
+ * cars — including the one this app was written for — report no VIN at all.
+ */
+@Composable
+private fun ModelPickerDialog(current: String?, onDismiss: () -> Unit, onPick: (String?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Which car is this?") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                item {
+                    Text(
+                        "Picking a model adds notes about faults commonly reported on it, and " +
+                            "links them to the codes they can set. Only models with a settled " +
+                            "fault history are listed — a car that is not here still reads " +
+                            "codes normally.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+                item {
+                    ModelOption("Not set", null, current == null) { onPick(null) }
+                }
+                items(KnownIssues.models, key = { it.id }) { model ->
+                    ModelOption(
+                        title = model.displayName,
+                        subtitle = "${model.issues.size} known issue" +
+                            if (model.issues.size == 1) "" else "s",
+                        selected = current == model.id,
+                    ) { onPick(model.id) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun ModelOption(
+    title: String,
+    subtitle: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            subtitle?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (selected) {
+            Icon(Icons.Filled.CheckCircle, contentDescription = "Selected", tint = Tone.ACCENT.color())
+        }
+    }
+}
+
+@Composable
+private fun ExportDialog(onDismiss: () -> Unit, onPick: (ExportFormat) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Export history") },
+        text = {
+            Column {
+                Text(
+                    "Everything recorded for this car, with dates — including codes that have " +
+                        "since been cleared from the ECU, which the car itself no longer knows " +
+                        "about.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                ExportFormat.entries.forEach { format ->
+                    ModelOption(format.label, format.detail, selected = false) { onPick(format) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Hands the exported file to whatever the user wants to send or open it with. */
+private fun shareHistory(context: android.content.Context, file: java.io.File, format: ExportFormat) {
+    runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file,
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = format.mime
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Vehicle history")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(intent, "Share vehicle history"))
+    }
+}
