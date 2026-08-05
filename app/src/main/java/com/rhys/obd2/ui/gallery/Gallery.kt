@@ -427,6 +427,59 @@ object Gallery {
         add(
             GalleryEntry(
                 group = "Readouts",
+                name = "gauge-temperature-scale",
+                notes = "A fluid temperature reads blue when cold, green through its working " +
+                    "range and red beyond it. Cold is not a fault, but an engine below " +
+                    "temperature is wearing faster and using more fuel, and that is worth " +
+                    "seeing without reading the number.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    listOf(
+                        listOf(12f to "12", 55f to "55", 78f to "78"),
+                        listOf(90f to "90", 108f to "108", 121f to "121"),
+                    ).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                            row.forEach { (v, text) ->
+                                Box(Modifier.weight(1f)) {
+                                    Gauge(
+                                        value = v, min = 0f, max = 130f,
+                                        label = "Coolant temperature", unit = "°C", valueText = text,
+                                        warningThreshold = 105f, dangerThreshold = 115f,
+                                        optimalRange = 82f..105f,
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        add(
+            GalleryEntry(
+                group = "Readouts",
+                name = "gauge-percentage-grading",
+                notes = "A parameter with no meaningful threshold grades across the whole " +
+                    "sweep instead, so a rising load is visible before it is critical.",
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    listOf(8f to "8", 42f to "42", 68f to "68", 95f to "95").forEach { (v, text) ->
+                        Box(Modifier.weight(1f)) {
+                            Gauge(
+                                value = v, min = 0f, max = 100f,
+                                label = "Engine load", unit = "%", valueText = text,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                            )
+                        }
+                    }
+                }
+            }
+        )
+
+        add(
+            GalleryEntry(
+                group = "Readouts",
                 name = "gauge-edge-cases",
                 notes = "No reading, a value pinned to each end of the scale, and a label " +
                     "long enough to wrap to its two-line limit.",

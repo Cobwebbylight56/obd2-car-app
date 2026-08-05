@@ -56,6 +56,14 @@ import com.rhys.obd2.ui.theme.TouchTarget
 import com.rhys.obd2.ui.theme.colors
 import kotlin.math.max
 
+/**
+ * The temperature at or below which a fluid gauge reads fully cold.
+ *
+ * An engine that has been standing sits at ambient, so anything up to about this is
+ * simply "not started yet" rather than a degree of warmth worth colouring differently.
+ */
+private const val COLD_ANCHOR = 40f
+
 // ---------------------------------------------------------------------------------------
 // Readouts
 // ---------------------------------------------------------------------------------------
@@ -83,38 +91,59 @@ fun Gauge(
     modifier: Modifier = Modifier,
     warningThreshold: Float? = null,
     dangerThreshold: Float? = null,
+    optimalRange: ClosedFloatingPointRange<Float>? = null,
 ) {
     val range = (max - min).takeIf { it > 0f } ?: 1f
     val fraction = ((value - min) / range).coerceIn(0f, 1f)
 
-    // Colour tracks how far round the dial the needle is, not just which band it is in.
+    val cold = Tone.INFO.colors().foreground
+    val accent = Tone.ACCENT.colors().foreground
+    val warning = Tone.WARNING.colors().foreground
+    val danger = Tone.DANGER.colors().foreground
+
+    // Which way the dial reads depends on what it is measuring, and there are two kinds.
     //
-    // Explicit thresholds still win where they exist, because they encode something the
-    // scale does not: 105 °C coolant is a warning at 62% of the dial, and 6500 rpm is a
-    // problem at 93%. Where a parameter has no meaningful threshold — a percentage, a
-    // load, a throttle opening — the sweep itself is the signal, and a dial that stays
-    // uniformly green until an invisible line is crossed throws that away.
+    // Most parameters are simply "more is worse": load, throttle, revs. For those the
+    // sweep itself is the signal and the dial warms from green through amber to red.
+    //
+    // A fluid temperature is different, because it has a wrong end at the bottom as well
+    // as the top. An engine below operating temperature is not faulty, but it is worth
+    // seeing: it is wearing faster, using more fuel, and not yet in closed loop. Blue for
+    // cold, green through the working range, warming to red beyond it, is how a
+    // temperature gauge has always been read.
     val tone = when {
         dangerThreshold != null && value >= dangerThreshold -> Tone.DANGER
         warningThreshold != null && value >= warningThreshold -> Tone.WARNING
+        optimalRange != null && value < optimalRange.start -> Tone.INFO
         warningThreshold != null || dangerThreshold != null -> Tone.ACCENT
         fraction >= 0.85f -> Tone.DANGER
         fraction >= 0.6f -> Tone.WARNING
         else -> Tone.ACCENT
     }
 
-    // Blended rather than stepped, so a rising value warms through amber instead of
-    // snapping from green to red at an arbitrary point.
-    val accent = Tone.ACCENT.colors().foreground
-    val warning = Tone.WARNING.colors().foreground
-    val danger = Tone.DANGER.colors().foreground
-    val graded = when {
+    // Blended rather than stepped, so a value moves through the intermediate colour
+    // instead of snapping at an invisible line.
+    val colour = when {
+        optimalRange != null -> {
+            val warmFrom = optimalRange.start
+            val hotFrom = warningThreshold ?: optimalRange.endInclusive
+            val hotTo = dangerThreshold ?: (hotFrom + 10f)
+            when {
+                // Fully cold below the point where an engine is unambiguously not warm.
+                value <= COLD_ANCHOR -> cold
+                value < warmFrom ->
+                    lerp(cold, accent, ((value - COLD_ANCHOR) / (warmFrom - COLD_ANCHOR)).coerceIn(0f, 1f))
+                value <= optimalRange.endInclusive -> accent
+                value < hotTo ->
+                    lerp(accent, danger, ((value - optimalRange.endInclusive) / (hotTo - optimalRange.endInclusive)).coerceIn(0f, 1f))
+                else -> danger
+            }
+        }
         warningThreshold != null || dangerThreshold != null -> tone.colors().foreground
         fraction <= 0.45f -> accent
         fraction <= 0.75f -> lerp(accent, warning, (fraction - 0.45f) / 0.30f)
         else -> lerp(warning, danger, ((fraction - 0.75f) / 0.25f).coerceAtMost(1f))
     }
-    val colour = graded
 
     // Values arrive from the car rather than from a tap, so they ease rather than snap;
     // a reading that jumps looks like a glitch, one that travels looks like a measurement.
@@ -144,6 +173,7 @@ fun Gauge(
         when (tone) {
             Tone.DANGER -> append(", above the safe range")
             Tone.WARNING -> append(", higher than normal")
+            Tone.INFO -> if (optimalRange != null) append(", still warming up")
             else -> Unit
         }
     }

@@ -168,13 +168,14 @@ private fun GaugeTile(
         ) {
             Gauge(
                 value = rawValue?.toFloat() ?: pid.min.toFloat(),
-                min = pid.min.toFloat(),
+                min = gaugeMin(pid).toFloat(),
                 max = gaugeMax(pid).toFloat(),
                 label = pid.name,
                 unit = displayUnit,
                 valueText = text,
                 warningThreshold = warn,
                 dangerThreshold = danger,
+                optimalRange = optimalRange(pid.id),
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.15f),
@@ -209,6 +210,36 @@ private fun gaugeMax(pid: Pid): Double = when (pid.id) {
     0x10 -> 200.0     // MAF
     0xA6 -> 300000.0  // odometer
     else -> pid.max
+}
+
+/**
+ * The working range for fluids that have to reach a temperature before the engine is
+ * running properly.
+ *
+ * Below it the gauge reads blue: not a fault, but the engine is wearing faster, using
+ * more fuel and not yet in closed loop, which is worth being able to see at a glance
+ * rather than having to read the number. Coolant settles between roughly 82 and 105 °C
+ * once the thermostat opens; oil runs hotter and takes longer to get there.
+ *
+ * Deliberately not applied to intake air, where cold is what you want.
+ */
+/**
+ * Where a gauge's scale starts.
+ *
+ * The standard's floor for a temperature is -40 °C, which is a real limit of the sensor
+ * and a useless one for a dial: it puts a stone-cold engine a quarter of the way round
+ * before it has done anything. Starting at zero means the sweep tracks warming up.
+ */
+private fun gaugeMin(pid: Pid): Double = when (pid.id) {
+    0x05, 0x0F, 0x46, 0x5C, 0x67 -> 0.0   // temperatures
+    else -> pid.min
+}
+
+private fun optimalRange(pidId: Int): ClosedFloatingPointRange<Float>? = when (pidId) {
+    0x05 -> 82f..105f    // engine coolant
+    0x5C -> 80f..115f    // engine oil
+    0x67 -> 82f..105f    // coolant, secondary sensor
+    else -> null
 }
 
 private fun thresholds(pidId: Int): Pair<Float?, Float?> = when (pidId) {
