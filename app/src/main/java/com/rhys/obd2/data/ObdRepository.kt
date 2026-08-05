@@ -180,6 +180,9 @@ class ObdRepository(
      * over-report; polling them forever would waste a third of the available bandwidth.
      */
     private val deadPids = mutableSetOf<Int>()
+
+    /** When each retired PID may be tried again. */
+    private val retiredAt = mutableMapOf<Int, Long>()
     private val failureCounts = mutableMapOf<Int, Int>()
 
     // ---------------------------------------------------------------------------------
@@ -291,6 +294,7 @@ class ObdRepository(
         transport?.close()
         transport = null
         deadPids.clear()
+        retiredAt.clear()
         failureCounts.clear()
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
@@ -360,6 +364,7 @@ class ObdRepository(
 
         pollJob = scope.launch {
             var samples = 0
+            var pass = 0
             var window = System.currentTimeMillis()
 
             while (isActive) {
@@ -375,17 +380,38 @@ class ObdRepository(
                     continue
                 }
 
+                // Give retired parameters another chance periodically rather than writing
+                // them off for the rest of the session.
+                val now0 = System.currentTimeMillis()
+                retiredAt.entries.filter { now0 - it.value >= RETIRE_RETRY_MS }.forEach {
+                    deadPids -= it.key
+                    failureCounts.remove(it.key)
+                }
+                retiredAt.keys.removeAll { it !in deadPids }
+
                 val active = pollTargets.filter { it !in deadPids }
                 if (active.isEmpty()) {
                     delay(1000)
                     continue
                 }
 
+                // Not every parameter deserves the same share of a slow bus.
+                //
+                // Coolant temperature moves over minutes; engine speed and throttle move
+                // faster than the eye. Polling them equally spent most of the available
+                // bandwidth re-reading numbers that had not changed, which is what made
+                // the gauges that matter feel laggy — five parameters at five reads a
+                // second is one update per second each, whether or not it was worth it.
+                //
+                // Slow-moving parameters are read every fourth pass instead, which roughly
+                // doubles the rate of the ones being watched.
                 for (pid in active) {
                     if (!isActive) break
+                    if (pid in SLOW_MOVING && pass % 4 != 0) continue
                     readAndStore(session, pid)
                     samples++
                 }
+                pass++
 
                 val now = System.currentTimeMillis()
                 val elapsed = now - window
@@ -423,6 +449,7 @@ class ObdRepository(
             failureCounts[pidId] = count
             if (count >= MAX_PID_FAILURES) {
                 deadPids += pidId
+                retiredAt[pidId] = System.currentTimeMillis()
                 Log.i(TAG, "Retiring PID ${definition.hex} after $count failures")
             }
             return
@@ -822,7 +849,42 @@ class ObdRepository(
     companion object {
         private const val TAG = "ObdRepository"
         private const val HISTORY_POINTS = 120
-        private const val MAX_PID_FAILURES = 3
+        /**
+         * Consecutive failures before a parameter is dropped from the rotation.
+         *
+         * Three was far too few. The older buses drop the occasional reply as a matter of
+         * course, so three unlucky reads in a row is an ordinary event rather than
+         * evidence of anything — and the consequence was a gauge going blank partway
+         * through a drive and never coming back, because retirement only lifted on
+         * reconnect. Twenty consecutive failures is a real signal; a handful is weather.
+         */
+        private const val MAX_PID_FAILURES = 20
+
+        /**
+         * How long a retired parameter stays retired before it is tried again.
+         *
+         * Retirement exists to stop bandwidth being wasted on a parameter the car claimed
+         * to support and doesn't, which is worth avoiding on a link this slow. It should
+         * not be a life sentence: a bus that was busy earlier may not be now.
+         */
+        private const val RETIRE_RETRY_MS = 60_000L
+
+        /**
+         * Parameters that change over minutes rather than moments.
+         *
+         * Temperatures, fuel level and battery voltage. Reading these as often as engine
+         * speed is bandwidth spent confirming that a number has not changed, on a link
+         * where bandwidth is the entire constraint.
+         */
+        private val SLOW_MOVING = setOf(
+            0x05, // coolant temperature
+            0x0F, // intake air temperature
+            0x2F, // fuel level
+            0x42, // control module voltage
+            0x46, // ambient air temperature
+            0x5C, // oil temperature
+            0x33, // barometric pressure
+        )
         private const val POLL_YIELD_MS = 50L
         private const val MAX_MONITOR_IDS = 24
 

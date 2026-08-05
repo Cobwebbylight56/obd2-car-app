@@ -127,7 +127,34 @@ object ObdParser {
             .filter { it.isNotEmpty() }
 
         if (hexLines.isEmpty()) return null
-        return hexLines.maxByOrNull { it.length }
+
+        // Several control units answering the same request is normal on the pre-CAN buses,
+        // and one of them routinely answers with saturated bytes — all FF — meaning "I
+        // don't have this" rather than a reading. Picking by arrival order made a gauge
+        // alternate between the real value and a constant, which on calculated engine load
+        // showed as a permanent 100% with a square-wave history while every other reading
+        // traced a smooth curve.
+        //
+        // A saturated line is only discarded when a real alternative exists, so a genuine
+        // reading that happens to be at full scale still gets through when it is the only
+        // answer.
+        val informative = hexLines.filterNot { isSaturated(it) }
+        val candidates = informative.ifEmpty { hexLines }
+
+        // Longest first for ISO-TP reassembly, then lowest lexicographically so the choice
+        // never depends on which control unit happened to reply first.
+        return candidates.sortedWith(compareByDescending<String> { it.length }.thenBy { it }).first()
+    }
+
+    /**
+     * True when a line's payload is entirely FF once its service marker is behind it.
+     *
+     * FF is what an ECU pads with, and what many older ones return for a parameter they
+     * report as supported but do not actually implement.
+     */
+    internal fun isSaturated(hex: String): Boolean {
+        val payload = hex.drop(4)
+        return payload.length >= 2 && payload.all { it == 'F' }
     }
 
     private fun cleanLines(raw: String): List<String> =

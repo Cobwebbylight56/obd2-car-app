@@ -128,6 +128,40 @@ class ObdParserTest {
     }
 
     @Test
+    fun `a padding response loses to a real one when both ECUs answer`() {
+        // What calculated engine load actually did on a 2003 car: two control units answer,
+        // one with a reading and one with FF meaning "not mine". Picking by arrival order
+        // pinned the gauge at 100% with a square-wave history while every other reading
+        // traced a smooth curve.
+        val data = ObdParser.parse("41 04 FF\r41 04 4B", mode = 0x01, pid = 0x04)!!
+        assertEquals(0x4B, data[0])
+    }
+
+    @Test
+    fun `the informative response wins regardless of which arrived first`() {
+        val first = ObdParser.parse("41 04 FF\r41 04 4B", mode = 0x01, pid = 0x04)!!
+        val second = ObdParser.parse("41 04 4B\r41 04 FF", mode = 0x01, pid = 0x04)!!
+        assertEquals("the choice must not depend on arrival order", first.toList(), second.toList())
+    }
+
+    @Test
+    fun `a genuine full-scale reading survives when it is the only answer`() {
+        // Discarding saturated payloads unconditionally would turn a real 100% into no
+        // reading at all, so it only applies when there is something else to choose.
+        val data = ObdParser.parse("41 04 FF", mode = 0x01, pid = 0x04)!!
+        assertEquals(0xFF, data[0])
+    }
+
+    @Test
+    fun `multi-byte responses are not mistaken for padding`() {
+        // 0x0C is two bytes; FF FF is a plausible-looking but saturated pair, while a real
+        // reading with one FF byte in it must not be discarded.
+        assertTrue(ObdParser.isSaturated("410CFFFF"))
+        assertTrue(!ObdParser.isSaturated("410CFF3A"))
+        assertTrue(!ObdParser.isSaturated("410C1AF8"))
+    }
+
+    @Test
     fun `hex conversion tolerates an odd number of characters`() {
         assertEquals(listOf(0x41, 0x05), ObdParser.hexToBytes("41055").toList())
     }

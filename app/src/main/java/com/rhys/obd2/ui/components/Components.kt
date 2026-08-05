@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -86,23 +87,48 @@ fun Gauge(
     val range = (max - min).takeIf { it > 0f } ?: 1f
     val fraction = ((value - min) / range).coerceIn(0f, 1f)
 
+    // Colour tracks how far round the dial the needle is, not just which band it is in.
+    //
+    // Explicit thresholds still win where they exist, because they encode something the
+    // scale does not: 105 °C coolant is a warning at 62% of the dial, and 6500 rpm is a
+    // problem at 93%. Where a parameter has no meaningful threshold — a percentage, a
+    // load, a throttle opening — the sweep itself is the signal, and a dial that stays
+    // uniformly green until an invisible line is crossed throws that away.
     val tone = when {
         dangerThreshold != null && value >= dangerThreshold -> Tone.DANGER
         warningThreshold != null && value >= warningThreshold -> Tone.WARNING
+        warningThreshold != null || dangerThreshold != null -> Tone.ACCENT
+        fraction >= 0.85f -> Tone.DANGER
+        fraction >= 0.6f -> Tone.WARNING
         else -> Tone.ACCENT
     }
-    val colour = tone.colors().foreground
+
+    // Blended rather than stepped, so a rising value warms through amber instead of
+    // snapping from green to red at an arbitrary point.
+    val accent = Tone.ACCENT.colors().foreground
+    val warning = Tone.WARNING.colors().foreground
+    val danger = Tone.DANGER.colors().foreground
+    val graded = when {
+        warningThreshold != null || dangerThreshold != null -> tone.colors().foreground
+        fraction <= 0.45f -> accent
+        fraction <= 0.75f -> lerp(accent, warning, (fraction - 0.45f) / 0.30f)
+        else -> lerp(warning, danger, ((fraction - 0.75f) / 0.25f).coerceAtMost(1f))
+    }
+    val colour = graded
 
     // Values arrive from the car rather than from a tap, so they ease rather than snap;
     // a reading that jumps looks like a glitch, one that travels looks like a measurement.
     val animated by animateFloatAsState(
         targetValue = fraction,
-        animationSpec = tween(Motion.Standard, easing = Motion.Decelerate),
+        // Deliberately shorter than the interval between readings. On a slow bus a gauge
+        // updates roughly once a second, and an animation that takes a quarter of that is
+        // the difference between a needle that answers the throttle and one that lags it.
+        animationSpec = tween(Motion.Fast, easing = Motion.Decelerate),
         label = "gaugeSweep",
     )
     val animatedColour by androidx.compose.animation.animateColorAsState(
         targetValue = colour,
-        animationSpec = tween(Motion.Slow, easing = Motion.Standard_),
+        animationSpec = tween(Motion.Standard, easing = Motion.Standard_),
         label = "gaugeTone",
     )
 
