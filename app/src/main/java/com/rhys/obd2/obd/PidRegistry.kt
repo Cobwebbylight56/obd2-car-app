@@ -289,9 +289,6 @@ object PidRegistry {
         add(Pid(0x30, "Warm-ups since codes cleared", "", 0.0, 255.0, 1, PidCategory.EMISSIONS) {
             one(it.a().toDouble())
         })
-        add(Pid(ESTIMATED_LOAD, "Engine load (estimated)", "%", 0.0, 100.0, 0, PidCategory.ENGINE) {
-            one(it.a().toDouble())
-        })
         add(Pid(0xA6, "Odometer", "km", 0.0, 429496729.5, 4, PidCategory.SPEED, featured = true) {
             val raw = (it[0].toLong() shl 24) or (it[1].toLong() shl 16) or (it[2].toLong() shl 8) or it[3].toLong()
             one(raw / 10.0)
@@ -491,7 +488,25 @@ object PidRegistry {
             }
     }.sortedBy { it.id }
 
-    private val byId: Map<Int, Pid> = ALL.associateBy { it.id }
+    /**
+     * Figures the app works out, which the car never sends.
+     *
+     * Kept out of [ALL] deliberately. That list means "parameters this standard defines",
+     * and everything downstream relies on it: the live data screen offers its contents to
+     * be polled, the support check compares against it, and a test asserts every member has
+     * a real byte count and a real id. A calculated value satisfies none of that and would
+     * quietly break all three — it was offered as something to poll, and it claimed zero
+     * bytes, which is what caught it.
+     *
+     * They resolve through [get] so a tile can look one up by id, and nowhere else.
+     */
+    private val SYNTHETIC: List<Pid> = listOf(
+        Pid(ESTIMATED_LOAD, "Engine load (estimated)", "%", 0.0, 100.0, 1, PidCategory.ENGINE) {
+            listOf(Reading("Engine load (estimated)", it.a().toDouble(), "%"))
+        },
+    )
+
+    private val byId: Map<Int, Pid> = (ALL + SYNTHETIC).associateBy { it.id }
 
     operator fun get(id: Int): Pid? = byId[id]
 
