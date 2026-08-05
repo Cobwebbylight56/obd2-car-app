@@ -162,6 +162,16 @@ class ObdParserTest {
     }
 
     @Test
+    fun `a single-byte full-scale payload is recognised as saturated`() {
+        // FF for calculated engine load decodes to a legal 100%, which is why it renders
+        // as a working gauge rather than as an obvious fault.
+        assertTrue(ObdParser.isSaturated("4104FF"))
+        assertTrue(!ObdParser.isSaturated("410441"))
+        assertTrue(!ObdParser.isSaturated("41040F"))
+        assertTrue(!ObdParser.isSaturated("4104F0"))
+    }
+
+    @Test
     fun `hex conversion tolerates an odd number of characters`() {
         assertEquals(listOf(0x41, 0x05), ObdParser.hexToBytes("41055").toList())
     }

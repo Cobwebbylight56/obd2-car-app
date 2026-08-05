@@ -183,6 +183,21 @@ class ObdRepository(
 
     /** When each retired PID may be tried again. */
     private val retiredAt = mutableMapOf<Int, Long>()
+
+    /**
+     * PIDs the car answers with saturated bytes every single time.
+     *
+     * Distinct from [deadPids], which is about a parameter that fails to answer. This is a
+     * parameter that answers confidently and wrongly, which is worse: FF decodes to a
+     * perfectly legal full-scale value, so the gauge shows a number rather than a gap and
+     * nothing about it looks broken.
+     *
+     * Not retried during a session. Unlike a dropped reply, which may be the bus being
+     * busy, this does not change while the engine is running — and bringing the gauge back
+     * every minute to show 100% again would be worse than leaving it out.
+     */
+    private val unsupportedPids = mutableSetOf<Int>()
+    private val saturatedCounts = mutableMapOf<Int, Int>()
     private val failureCounts = mutableMapOf<Int, Int>()
 
     // ---------------------------------------------------------------------------------
@@ -295,6 +310,8 @@ class ObdRepository(
         transport = null
         deadPids.clear()
         retiredAt.clear()
+        unsupportedPids.clear()
+        saturatedCounts.clear()
         failureCounts.clear()
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
@@ -389,7 +406,7 @@ class ObdRepository(
                 }
                 retiredAt.keys.removeAll { it !in deadPids }
 
-                val active = pollTargets.filter { it !in deadPids }
+                val active = pollTargets.filter { it !in deadPids && it !in unsupportedPids }
                 if (active.isEmpty()) {
                     delay(1000)
                     continue
@@ -456,6 +473,38 @@ class ObdRepository(
         }
 
         failureCounts.remove(pidId)
+
+        // A parameter pinned to full scale forever is a stub, not a sensor.
+        //
+        // FF is what an ECU pads with and what many older ones return for something they
+        // report as supported but never implemented. Decoded, it is a legal maximum —
+        // 100% engine load, 255 kPa, 1.0 lambda — so it renders as a confident reading
+        // and the gauge looks like it is working.
+        //
+        // The discriminator is persistence, not the value. A real reading can touch full
+        // scale; a genuine 100% load happens under hard acceleration. What never happens
+        // is full scale on twenty consecutive reads, roughly twenty seconds, spanning
+        // idle and cruise alike. That is the case being caught here.
+        if (result.data.isNotEmpty() && result.data.all { it == 0xFF }) {
+            val saturated = (saturatedCounts[pidId] ?: 0) + 1
+            saturatedCounts[pidId] = saturated
+            if (saturated >= MAX_SATURATED_READS) {
+                unsupportedPids += pidId
+                saturatedCounts.remove(pidId)
+                // Drop the last value too, so the gauge falls back to "no reading" rather
+                // than freezing on the fiction it was showing.
+                _liveData.update { it - pidId }
+                Log.i(
+                    TAG,
+                    "Treating PID ${definition.hex} (${definition.name}) as unsupported: " +
+                        "answered full-scale $saturated times running",
+                )
+                return
+            }
+        } else {
+            saturatedCounts.remove(pidId)
+        }
+
         val readings = definition.decode(result.data)
         if (readings.isEmpty()) return
 
@@ -868,6 +917,15 @@ class ObdRepository(
          * not be a life sentence: a bus that was busy earlier may not be now.
          */
         private const val RETIRE_RETRY_MS = 60_000L
+
+        /**
+         * Consecutive full-scale readings before a parameter is treated as not implemented.
+         *
+         * Twenty, at roughly one read a second, is twenty seconds of an absolutely
+         * unchanging maximum. A real sensor does not do that — even at sustained full
+         * throttle the last digit moves.
+         */
+        private const val MAX_SATURATED_READS = 20
 
         /**
          * Parameters that change over minutes rather than moments.
