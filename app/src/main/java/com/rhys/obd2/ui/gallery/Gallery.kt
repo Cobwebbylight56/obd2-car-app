@@ -116,9 +116,12 @@ object Gallery {
             GalleryEntry(
                 group = "Foundations",
                 name = "colour-status-tones",
-                notes = "Every status tone with its foreground, container and outline. The " +
-                    "light and dark renders of this one entry are the check that would have " +
-                    "caught the unreadable light theme.",
+                notes = "Every status tone with its four roles. The light and dark renders " +
+                    "of this one entry are the check that would have caught the unreadable " +
+                    "light theme. 'ink' is the drawn-shape tone — held to 3:1 rather than " +
+                    "4.5:1, and so allowed the chroma that text cannot have; in the light " +
+                    "column it should be visibly more colourful than 'fg', and in the dark " +
+                    "column identical to it.",
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
                     Tone.entries.forEach { tone ->
@@ -128,6 +131,7 @@ object Gallery {
                             Spacer(Modifier.height(Space.xs))
                             Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                                 Swatch("fg", c.foreground)
+                                Swatch("ink", c.graphic)
                                 Swatch("container", c.container)
                                 Swatch("outline", c.outline)
                             }

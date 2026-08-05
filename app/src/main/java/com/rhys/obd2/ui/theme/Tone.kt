@@ -33,18 +33,24 @@ enum class Tone {
 
 /** Resolved colours for a tone in the current theme. */
 @Immutable
-data class ToneColors(val foreground: Color, val container: Color, val outline: Color)
+data class ToneColors(
+    val foreground: Color,
+    val container: Color,
+    val outline: Color,
+    /** For drawn shapes — arcs, bars, lines — which the standard holds to 3:1, not 4.5:1. */
+    val graphic: Color,
+)
 
 @Composable
 @ReadOnlyComposable
 fun Tone.colors(): ToneColors {
     val s = MaterialTheme.status
     return when (this) {
-        Tone.ACCENT -> ToneColors(s.accent, s.accentContainer, s.accentOutline)
-        Tone.WARNING -> ToneColors(s.warning, s.warningContainer, s.warningOutline)
-        Tone.DANGER -> ToneColors(s.danger, s.dangerContainer, s.dangerOutline)
-        Tone.INFO -> ToneColors(s.info, s.infoContainer, s.infoOutline)
-        Tone.NEUTRAL -> ToneColors(s.neutral, s.neutralContainer, s.neutralOutline)
+        Tone.ACCENT -> ToneColors(s.accent, s.accentContainer, s.accentOutline, s.accentGraphic)
+        Tone.WARNING -> ToneColors(s.warning, s.warningContainer, s.warningOutline, s.warningGraphic)
+        Tone.DANGER -> ToneColors(s.danger, s.dangerContainer, s.dangerOutline, s.dangerGraphic)
+        Tone.INFO -> ToneColors(s.info, s.infoContainer, s.infoOutline, s.infoGraphic)
+        Tone.NEUTRAL -> ToneColors(s.neutral, s.neutralContainer, s.neutralOutline, s.neutralGraphic)
     }
 }
 
@@ -52,3 +58,8 @@ fun Tone.colors(): ToneColors {
 @Composable
 @ReadOnlyComposable
 fun Tone.color(): Color = colors().foreground
+
+/** The drawn-ink colour, for gauge arcs and sparklines. */
+@Composable
+@ReadOnlyComposable
+fun Tone.graphic(): Color = colors().graphic

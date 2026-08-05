@@ -66,6 +66,16 @@ import kotlin.math.max
  */
 private const val COLD_ANCHOR = 40f
 
+/**
+ * Where a "more is worse" gauge stops being green, and where it starts going red.
+ *
+ * These match the bands the spoken description uses, so the colour and the words a screen
+ * reader says never disagree — a gauge that looks amber and announces itself as normal is
+ * worse than either signal on its own.
+ */
+private const val WARM_FRACTION = 0.6f
+private const val HOT_FRACTION = 0.8f
+
 // ---------------------------------------------------------------------------------------
 // Readouts
 // ---------------------------------------------------------------------------------------
@@ -98,10 +108,12 @@ fun Gauge(
     val range = (max - min).takeIf { it > 0f } ?: 1f
     val fraction = ((value - min) / range).coerceIn(0f, 1f)
 
-    val cold = Tone.INFO.colors().foreground
-    val accent = Tone.ACCENT.colors().foreground
-    val warning = Tone.WARNING.colors().foreground
-    val danger = Tone.DANGER.colors().foreground
+    // The ink tones, not the text ones. An arc is a graphic and is allowed to be more
+    // chromatic than a label; using the text tones is what made a hot engine olive.
+    val cold = Tone.INFO.colors().graphic
+    val accent = Tone.ACCENT.colors().graphic
+    val warning = Tone.WARNING.colors().graphic
+    val danger = Tone.DANGER.colors().graphic
 
     // Which way the dial reads depends on what it is measuring, and there are two kinds.
     //
@@ -118,40 +130,47 @@ fun Gauge(
         warningThreshold != null && value >= warningThreshold -> Tone.WARNING
         optimalRange != null && value < optimalRange.start -> Tone.INFO
         warningThreshold != null || dangerThreshold != null -> Tone.ACCENT
-        fraction >= 0.85f -> Tone.DANGER
-        fraction >= 0.6f -> Tone.WARNING
+        fraction >= HOT_FRACTION -> Tone.DANGER
+        fraction >= WARM_FRACTION -> Tone.WARNING
         else -> Tone.ACCENT
     }
 
-    // Blended rather than stepped, so a value moves through the intermediate colour
-    // instead of snapping at an invisible line.
+    // Where the arc blends and where it steps, and why it is not blended throughout.
+    //
+    // Blending everything sounds kinder and looks worse. Green and orange are on opposite
+    // sides of the colour wheel by hue but not by lightness, so every intermediate between
+    // them is olive — a colour that reads as a faded gauge rather than a warming one. That
+    // is what 108 °C and 68% load actually looked like: dirty, and not obviously worse than
+    // 90 °C or 42%.
+    //
+    // So the arc steps once, at the boundary where the meaning changes from "fine" to
+    // "watch this", and blends only where the blend stays honest: cold to warm (through
+    // teal, which is a real colour) and orange to red (both warm, no muddy middle). A step
+    // at a boundary that means something is not a defect; it is the gauge saying so.
     val colour = when {
         optimalRange != null -> {
             val warmFrom = optimalRange.start
             val optimalTo = optimalRange.endInclusive
             val hotTo = dangerThreshold ?: (optimalTo + 10f)
-            // Amber sits between green and red rather than being skipped. Blending the two
-            // ends directly passes through a desaturated grey-green midpoint that reads as
-            // a faded gauge rather than a warming one — which is exactly what 108 °C looked
-            // like before: washed out, and not obviously worse than 90.
-            val midHot = (optimalTo + hotTo) / 2f
             when {
                 // Fully cold below the point where an engine is unambiguously not warm.
                 value <= COLD_ANCHOR -> cold
                 value < warmFrom ->
                     lerp(cold, accent, ((value - COLD_ANCHOR) / (warmFrom - COLD_ANCHOR)).coerceIn(0f, 1f))
                 value <= optimalTo -> accent
-                value < midHot ->
-                    lerp(accent, warning, ((value - optimalTo) / (midHot - optimalTo)).coerceIn(0f, 1f))
                 value < hotTo ->
-                    lerp(warning, danger, ((value - midHot) / (hotTo - midHot)).coerceIn(0f, 1f))
+                    lerp(warning, danger, ((value - optimalTo) / (hotTo - optimalTo)).coerceIn(0f, 1f))
                 else -> danger
             }
         }
-        warningThreshold != null || dangerThreshold != null -> tone.colors().foreground
-        fraction <= 0.45f -> accent
-        fraction <= 0.75f -> lerp(accent, warning, (fraction - 0.45f) / 0.30f)
-        else -> lerp(warning, danger, ((fraction - 0.75f) / 0.25f).coerceAtMost(1f))
+        warningThreshold != null || dangerThreshold != null -> tone.colors().graphic
+        fraction < WARM_FRACTION -> accent
+        fraction < HOT_FRACTION -> warning
+        else -> lerp(
+            warning,
+            danger,
+            ((fraction - HOT_FRACTION) / (1f - HOT_FRACTION)).coerceIn(0f, 1f),
+        )
     }
 
     // Values arrive from the car rather than from a tap, so they ease rather than snap;
@@ -291,7 +310,7 @@ fun Sparkline(
         return
     }
 
-    val colour = tone.colors().foreground
+    val colour = tone.colors().graphic
     val minValue = points.min()
     val maxValue = points.max()
     val span = max(maxValue - minValue, 0.0001f)

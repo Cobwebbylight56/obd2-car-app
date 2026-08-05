@@ -107,6 +107,63 @@ class ContrastTest {
     }
 
     @Test
+    fun `graphic tones meet the bar for a meaningful graphic`() {
+        // 3:1, not 4.5:1 — WCAG holds a drawn shape to a lower bar than text, and that
+        // slack is the entire reason these tones exist. It is not licence to go pale: a
+        // gauge arc still has to be findable at arm's length in daylight.
+        listOf(
+            Triple("dark", DarkStatusColors, darkSurfaces),
+            Triple("light", LightStatusColors, lightSurfaces),
+        ).forEach { (theme, s, surfaces) ->
+            graphics(s).forEach { (name, ink) ->
+                surfaces.forEach { (surfaceName, surface) ->
+                    val ratio = contrast(ink, surface)
+                    assertTrue(
+                        "$theme $name graphic on $surfaceName measures " +
+                            "${"%.2f".format(ratio)}:1, below the 3:1 a graphic needs",
+                        ratio >= 3.0,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `no gauge blend passes through mud`() {
+        // A gauge fades between adjacent tones. If the halfway point is markedly less
+        // colourful than either end, the arc reads as a faded instrument rather than as a
+        // warming one — which is what an engine at 108 degrees looked like: no more
+        // alarming than one at 90.
+        //
+        // The pairing that caused that, the old dark green to the old dark amber, measured
+        // 0.24 on this scale. The blends performed now measure 0.54 and above, so the floor
+        // sits between: comfortably clear of what ships, comfortably above what failed.
+        //
+        // Green to orange is a pairing no two colours can survive — every intermediate is
+        // olive — so the gauge steps across that boundary instead of fading. This checks
+        // only the blends it actually performs.
+        listOf("dark" to DarkStatusColors, "light" to LightStatusColors).forEach { (theme, s) ->
+            listOf(
+                "cold to healthy" to (s.infoGraphic to s.accentGraphic),
+                "warning to danger" to (s.warningGraphic to s.dangerGraphic),
+            ).forEach { (what, ends) ->
+                val (from, to) = ends
+                val midpoint = Color(
+                    red = (from.red + to.red) / 2f,
+                    green = (from.green + to.green) / 2f,
+                    blue = (from.blue + to.blue) / 2f,
+                )
+                assertTrue(
+                    "$theme $what blends through a washed-out midpoint " +
+                        "(chroma ${"%.3f".format(chroma(midpoint))}, want $MIN_BLEND_CHROMA " +
+                        "or more)",
+                    chroma(midpoint) >= MIN_BLEND_CHROMA,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `the two themes define the same set of meanings`() {
         // A tone present in one theme and missing in the other would resolve to whatever the
         // data class default happened to be, which is how one-theme bugs start.
@@ -133,6 +190,23 @@ class ContrastTest {
         "info" to (s.info to s.infoContainer),
         "neutral" to (s.neutral to s.neutralContainer),
     )
+
+    private fun graphics(s: StatusColors): Map<String, Color> = mapOf(
+        "accent" to s.accentGraphic,
+        "warning" to s.warningGraphic,
+        "danger" to s.dangerGraphic,
+        "info" to s.infoGraphic,
+        "neutral" to s.neutralGraphic,
+    )
+
+    /**
+     * How colourful a colour is, on the crude but sufficient max-minus-min measure.
+     *
+     * Grey is 0 and a pure hue is 1. Enough to catch a blend collapsing towards grey, which
+     * is the only thing it is used for here.
+     */
+    private fun chroma(c: Color): Float =
+        maxOf(c.red, c.green, c.blue) - minOf(c.red, c.green, c.blue)
 
     private fun assertAllForegrounds(
         theme: String,
@@ -163,6 +237,11 @@ class ContrastTest {
         return 0.2126 * channel(colour.red) +
             0.7152 * channel(colour.green) +
             0.0722 * channel(colour.blue)
+    }
+
+    private companion object {
+        /** See `no gauge blend passes through mud` for where this number comes from. */
+        const val MIN_BLEND_CHROMA = 0.45f
     }
 
     private fun contrast(a: Color, b: Color): Double {

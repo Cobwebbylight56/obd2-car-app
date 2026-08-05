@@ -53,7 +53,6 @@ import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.theme.colors
 import com.rhys.obd2.ui.components.ExplainerCard
-import com.rhys.obd2.ui.theme.NumericMedium
 import androidx.compose.runtime.remember
 
 @Composable
@@ -496,7 +495,12 @@ internal fun OdometerHeader(km: Double?, units: UnitSystem, rollback: Boolean) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         "%,.0f".format(java.util.Locale.UK, converted.value),
-                        style = NumericMedium,
+                        // Proportional, not the monospaced gauge style. Monospacing exists
+                        // to stop a live number jumping sideways as its digits change, and
+                        // total mileage does not change while you watch it. What it does
+                        // have is a thousands separator, and a monospaced comma sits in a
+                        // full character cell — "184 , 373", read as three numbers.
+                        style = MaterialTheme.typography.displaySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
