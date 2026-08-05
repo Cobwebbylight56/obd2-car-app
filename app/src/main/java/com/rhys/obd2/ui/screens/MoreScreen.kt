@@ -47,6 +47,8 @@ import com.rhys.obd2.ui.components.StatusPill
 import com.rhys.obd2.ui.theme.Tone
 import com.rhys.obd2.ui.theme.color
 import com.rhys.obd2.ui.components.ScreenHeader
+import com.rhys.obd2.BuildConfig
+import com.rhys.obd2.ui.components.InfoRow
 
 @Composable
 fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
@@ -162,6 +164,16 @@ fun MoreScreen(viewModel: ObdViewModel, onNavigate: (String) -> Unit) {
         item {
             SectionCard(title = "About") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Which build this actually is.
+                    //
+                    // Downloads land in a folder full of similarly named files and Android
+                    // never overwrites one, so "am I running the new version?" was a
+                    // question with no way to answer it. Now it is one screen away, and the
+                    // commit shown here matches the name of the APK it came from.
+                    InfoRow("Version", BuildConfig.VERSION_NAME)
+                    InfoRow("Build", BuildConfig.GIT_SHA)
+                    InfoRow("Built", BuildConfig.BUILD_TIME)
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         "OpenOBD talks to any ELM327-compatible adapter over Bluetooth LE, classic " +
                             "Bluetooth or Wi-Fi, and implements OBD-II services 01 through 0A: live data, " +

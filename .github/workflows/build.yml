@@ -62,15 +62,19 @@ jobs:
       # several files called app-debug.apk that can only be told apart by a timestamp,
       # which is in UTC and therefore reads an hour off in British summer time.
       - name: Name the APK after the commit
+        id: naming
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk \
-             "dist/OpenOBD-${GITHUB_SHA::7}.apk"
+          short="${GITHUB_SHA::7}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/OpenOBD-${short}.apk"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOBD-${{ github.sha }}
+          # Short commit rather than the full forty characters, so the downloaded zip is
+          # readable in a phone's file list instead of being elided in the middle.
+          name: OpenOBD-${{ steps.naming.outputs.short }}
           path: dist/*.apk
           if-no-files-found: error
 

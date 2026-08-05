@@ -1,3 +1,36 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
+/**
+ * Which build this is.
+ *
+ * Every build previously declared itself version 1.0, versionCode 1. Nothing in the APK
+ * distinguished one from another, so Android could not tell a newer build from an older
+ * one, and after installing there was no way at all to check which you were running —
+ * "it's loaded an old version again" was unfalsifiable.
+ *
+ * CI supplies the run number and commit; a local build falls back to asking git, and to
+ * something obviously non-CI if even that fails.
+ */
+fun gitShortSha(): String =
+    System.getenv("GITHUB_SHA")?.take(7)
+        ?: runCatching {
+            ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
+                .directory(rootDir)
+                .start()
+                .inputStream.bufferedReader().readText().trim()
+                .takeIf { it.isNotBlank() }
+        }.getOrNull()
+        ?: "local"
+
+fun buildNumber(): Int = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
+fun buildStamp(): String = SimpleDateFormat("yyyy-MM-dd HH:mm 'UTC'", Locale.UK)
+    .apply { timeZone = TimeZone.getTimeZone("UTC") }
+    .format(Date())
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,8 +46,13 @@ android {
         applicationId = "com.rhys.obd2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Rises with every CI build, so Android knows which is newer and refuses to go
+        // backwards by accident.
+        versionCode = buildNumber()
+        versionName = "1.0.${buildNumber()} (${gitShortSha()})"
+
+        buildConfigField("String", "GIT_SHA", "\"${gitShortSha()}\"")
+        buildConfigField("String", "BUILD_TIME", "\"${buildStamp()}\"")
     }
 
     signingConfigs {
@@ -59,6 +97,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Needed for the build stamp the About screen shows.
+        buildConfig = true
     }
 
     packaging {
