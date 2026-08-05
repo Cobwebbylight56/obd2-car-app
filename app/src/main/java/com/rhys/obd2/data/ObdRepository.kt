@@ -208,6 +208,47 @@ class ObdRepository(
     private val saturatedCounts = mutableMapOf<Int, Int>()
     private val failureCounts = mutableMapOf<Int, Int>()
 
+    /**
+     * Counts readings of calculated load that the engine cannot possibly be producing.
+     *
+     * Full-scale padding is not the only way this parameter comes back useless, and
+     * checking for FF alone let a Freelander sit at a flat 100% indefinitely. Two causes
+     * produce the same symptom:
+     *
+     * An ECU that reports the parameter as supported and answers FF for it — caught by the
+     * saturation check below, but only when the byte really is FF.
+     *
+     * And a diesel. The standard defines calculated load as airflow now over the most
+     * airflow possible at this speed, and a diesel runs unthrottled: it swallows almost as
+     * much air per revolution at idle as at full power, because its power comes from fuel
+     * rather than from air. The ratio is therefore near one whatever the engine is doing,
+     * and the ECU is reporting it perfectly correctly. The number is simply not a measure
+     * of load on that engine.
+     *
+     * Both are caught by the physics instead of by the byte: an engine idling below
+     * [IDLE_RPM_CEILING] in a stationary car is not at [IMPLAUSIBLE_LOAD_PERCENT] of its
+     * capacity, whatever the reason the ECU says so.
+     */
+    private var implausibleLoadReads = 0
+
+    /** Set once calculated load has been ruled unusable, for the note on the gauge. */
+    private val _loadUnusableReason = MutableStateFlow<String?>(null)
+    val loadUnusableReason: StateFlow<String?> = _loadUnusableReason.asStateFlow()
+
+    /**
+     * Battery voltage read from the adapter rather than from the car.
+     *
+     * PID 42 reached the standard late and neither of the cars this was tested against
+     * answers it, so the gauge sat empty. Every ELM327 has its own voltmeter across pins 16
+     * and 4 of the connector and reports it with ATRV — which is the same battery, measured
+     * at the same place a garage would put its probes, and available on every car ever made
+     * with an OBD-II socket. It is a better source than the PID, not a worse one.
+     *
+     * It arrives in [liveData] under [PidRegistry.ADAPTER_VOLTAGE] rather than in a flow of
+     * its own, so a gauge reads it exactly as it reads anything the car reported and the
+     * history trace comes for free.
+     */
+
     // ---------------------------------------------------------------------------------
     // Connection
     // ---------------------------------------------------------------------------------
@@ -323,6 +364,8 @@ class ObdRepository(
         odometerRecorded = false
         loadEstimator.reset()
         _loadEstimate.value = null
+        implausibleLoadReads = 0
+        _loadUnusableReason.value = null
         failureCounts.clear()
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
@@ -444,6 +487,17 @@ class ObdRepository(
                     readAndStore(session, pid)
                     samples++
                 }
+
+                // Battery voltage from the adapter's own voltmeter, on the slow cadence
+                // because it is a battery and it does not move quickly.
+                //
+                // Read unconditionally rather than only when the car refuses PID 42. ATRV
+                // is answered by the adapter itself and never reaches the bus, so it costs
+                // nothing that matters, and making it conditional meant waiting for twenty
+                // failed reads of PID 42 before the gauge could fill — on a car that simply
+                // does not implement it, that is the whole session. The dashboard prefers
+                // the car's own figure whenever there is one.
+                if (pass % 4 == 0) readAdapterVoltage(session)
                 pass++
 
                 val now = System.currentTimeMillis()
@@ -566,15 +620,84 @@ class ObdRepository(
 
         // Only stands in when the car will not give a real one — either it never advertised
         // the parameter, or it advertised it and answers nothing but padding.
+        if (pidId == PID_LOAD) checkLoadIsPlausible(readings.first().value)
+
         if (realLoadMissing() && pidId in LOAD_INPUTS) {
             updateLoadEstimate(now)
         }
     }
 
-    /** True once it is settled that this car will not report a calculated load itself. */
+    /**
+     * Rules calculated load out when the engine cannot be producing what the ECU reports.
+     *
+     * The test is a stationary car at idle. Nothing an engine does at 800 rpm with the
+     * handbrake on is nearly all of what it is capable of, so a reading that says otherwise
+     * is not describing load. It takes several consecutive readings rather than one,
+     * because a single sample could land during a blip of throttle.
+     */
+    private fun checkLoadIsPlausible(percent: Double) {
+        if (PID_LOAD in unsupportedPids) return
+
+        val rpm = _liveData.value[PID_RPM]?.primary?.value
+        val speed = _liveData.value[PID_SPEED]?.primary?.value
+        val idling = rpm != null && rpm in MIN_RUNNING_RPM..IDLE_RPM_CEILING &&
+            (speed == null || speed <= 0.0)
+
+        if (!idling) return
+
+        if (percent < IMPLAUSIBLE_LOAD_PERCENT) {
+            implausibleLoadReads = 0
+            return
+        }
+
+        implausibleLoadReads++
+        if (implausibleLoadReads < IMPLAUSIBLE_LOAD_READS) return
+
+        unsupportedPids += PID_LOAD
+        _liveData.update { it - PID_LOAD }
+        _loadUnusableReason.value =
+            "This car reported ${"%.0f".format(java.util.Locale.UK, percent)}% load at idle, " +
+                "which an engine cannot do. Either the ECU is padding the answer, or this " +
+                "is a diesel — a diesel breathes almost as hard at idle as at full power, " +
+                "so the standard's load figure sits near 100% however it is driven. The " +
+                "figure below is worked out from airflow instead."
+        Log.i(TAG, "Calculated load ruled unusable: $percent% at ${rpm?.toInt()} rpm, stationary")
+    }
+
+    /** True once it is settled that this car will not report a usable calculated load. */
     private fun realLoadMissing(): Boolean {
         val known = _supportedPids.value
         return PID_LOAD in unsupportedPids || (known.isNotEmpty() && PID_LOAD !in known)
+    }
+
+    /**
+     * Asks the adapter what the battery is doing.
+     *
+     * ATRV answers with a decimal and a V — "12.6V" — and clones vary in whether they pad
+     * it, echo the command first, or append the prompt, so the number is picked out rather
+     * than parsed positionally. A reading outside [PLAUSIBLE_VOLTS] is the adapter failing
+     * to answer rather than a battery in an extraordinary state, and is dropped.
+     */
+    private suspend fun readAdapterVoltage(session: Elm327) {
+        val raw = runCatching { adapterLock.withLock { session.command("ATRV") } }.getOrNull()
+            ?: return
+        val volts = VOLTAGE_PATTERN.find(raw)?.value?.toDoubleOrNull() ?: return
+        if (volts !in PLAUSIBLE_VOLTS) return
+
+        val pid = PidRegistry[PidRegistry.ADAPTER_VOLTAGE] ?: return
+        val now = System.currentTimeMillis()
+        _liveData.update { current ->
+            val previous = current[PidRegistry.ADAPTER_VOLTAGE]
+            val history = ((previous?.history ?: emptyList()) + volts.toFloat())
+                .takeLast(HISTORY_POINTS)
+            current + (PidRegistry.ADAPTER_VOLTAGE to
+                LiveValue(
+                    PidRegistry.ADAPTER_VOLTAGE,
+                    listOf(Reading(pid.name, volts, "V")),
+                    now,
+                    history,
+                ))
+        }
     }
 
     /**
@@ -1065,6 +1188,27 @@ class ObdRepository(
         const val PID_MAF = 0x10
         const val PID_RPM = 0x0C
         const val PID_THROTTLE = 0x11
+        const val PID_SPEED = 0x0D
+
+        /** An engine turning but not being driven. */
+        const val MIN_RUNNING_RPM = 300.0
+        const val IDLE_RPM_CEILING = 1_400.0
+
+        /**
+         * The load figure above which a stationary idling engine is not being described.
+         *
+         * Deliberately short of 100. An ECU padding with FF gives exactly 100.0, but a
+         * diesel's genuine airflow ratio lands anywhere in the nineties, and both are
+         * equally useless as a load reading.
+         */
+        const val IMPLAUSIBLE_LOAD_PERCENT = 92.0
+        const val IMPLAUSIBLE_LOAD_READS = 6
+
+        /** First decimal number in the adapter's ATRV reply. */
+        private val VOLTAGE_PATTERN = Regex("""\d{1,2}\.\d+""")
+
+        /** Anything outside this is the adapter not answering, not a remarkable battery. */
+        private val PLAUSIBLE_VOLTS = 6.0..36.0
 
         /**
          * What a derived load figure is worked out from, best first.

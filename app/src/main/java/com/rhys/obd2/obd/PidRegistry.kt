@@ -504,6 +504,9 @@ object PidRegistry {
         Pid(ESTIMATED_LOAD, "Engine load (estimated)", "%", 0.0, 100.0, 1, PidCategory.ENGINE) {
             listOf(Reading("Engine load (estimated)", it.a().toDouble(), "%"))
         },
+        Pid(ADAPTER_VOLTAGE, "Battery voltage", "V", 0.0, 16.0, 1, PidCategory.ELECTRICAL) {
+            listOf(Reading("Battery voltage", it.a().toDouble(), "V"))
+        },
     )
 
     private val byId: Map<Int, Pid> = (ALL + SYNTHETIC).associateBy { it.id }
@@ -522,6 +525,17 @@ object PidRegistry {
      * and it must never end up in a request to the car.
      */
     const val ESTIMATED_LOAD = 0x1004
+
+    /**
+     * Battery voltage measured by the adapter rather than reported by the car.
+     *
+     * PID 42 reached the standard late and plenty of cars never answer it, which left the
+     * voltage gauge permanently empty. Every ELM327 measures the battery itself across the
+     * connector and reports it with ATRV — the same battery, at the same point a garage
+     * would put its probes, on every car with an OBD-II socket. Outside the byte range for
+     * the same reason as the estimated load: it must never become a request to the car.
+     */
+    const val ADAPTER_VOLTAGE = 0x1042
 
     /** The support-bitmap PIDs, which are polled to discover what the car implements. */
     val SUPPORT_PIDS = listOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0)

@@ -73,6 +73,7 @@ fun DashboardScreen(
     val rollback = remember(vehicle?.key) { viewModel.odometerWentBackwards() }
     val supported by viewModel.supportedPids.collectAsState()
     val loadEstimate by viewModel.loadEstimate.collectAsState()
+    val loadUnusableReason by viewModel.loadUnusableReason.collectAsState()
     val showOdometer by viewModel.settings.showOdometer.collectAsState()
 
     val odometerKm = live[0xA6]?.primary?.value
@@ -91,7 +92,13 @@ fun DashboardScreen(
     // Substituted, not added alongside. Two load gauges side by side, one real and one
     // derived, is a puzzle rather than a dashboard.
     val realLoadMissing = supported.isNotEmpty() && 0x04 !in supported ||
-        live[PidRegistry.ESTIMATED_LOAD] != null && live[0x04] == null
+        live[PidRegistry.ESTIMATED_LOAD] != null && live[0x04] == null ||
+        loadUnusableReason != null
+
+    // Same substitution for the battery. PID 42 is a late addition and plenty of cars
+    // never answer it, which is why this gauge sat empty; the adapter measures the same
+    // battery itself and every ELM327 will report it.
+    val carVoltageMissing = live[PidRegistry.ADAPTER_VOLTAGE] != null && live[0x42] == null
 
     // Polling belongs to whichever screen is showing, so leaving the dashboard hands the
     // adapter back rather than competing with the next screen's requests.
@@ -162,7 +169,13 @@ fun DashboardScreen(
         }
 
         val gaugePids = dashboardPids
-            .map { if (it == 0x04 && realLoadMissing) PidRegistry.ESTIMATED_LOAD else it }
+            .map {
+                when {
+                    it == 0x04 && realLoadMissing -> PidRegistry.ESTIMATED_LOAD
+                    it == 0x42 && carVoltageMissing -> PidRegistry.ADAPTER_VOLTAGE
+                    else -> it
+                }
+            }
             .mapNotNull { PidRegistry[it] }
         items(gaugePids, key = { it.id }) { pid ->
             val value = live[pid.id]
@@ -175,13 +188,15 @@ fun DashboardScreen(
                 // like the app losing something; a gauge that says the car doesn't report
                 // it is the actual answer, and it comes back on a car that does.
                 unsupported = supported.isNotEmpty() && pid.id <= 0xFF && pid.id !in supported,
-                footnote = if (pid.id == PidRegistry.ESTIMATED_LOAD) {
+                footnote = when (pid.id) {
                     // Never blank. An empty derived gauge is indistinguishable from the
                     // broken reading it replaced, so it says what it is waiting for.
-                    loadEstimate?.let { "${it.confidence.label} — ${it.basis}" }
-                        ?: "Waiting for airflow or throttle"
-                } else {
-                    null
+                    PidRegistry.ESTIMATED_LOAD ->
+                        loadEstimate?.let { "${it.confidence.label} — ${it.basis}" }
+                            ?: "Waiting for airflow"
+                    // Where the number came from, because it did not come from the car.
+                    PidRegistry.ADAPTER_VOLTAGE -> "Measured at the adapter"
+                    else -> null
                 },
             )
         }
@@ -190,12 +205,17 @@ fun DashboardScreen(
             item(span = { GridItemSpan(2) }) {
                 ExplainerCard(
                     tone = Tone.INFO,
-                    text = "This car's ECU doesn't report engine load, so the app works one out " +
-                        "from airflow and engine speed, learning this engine's maximum as you " +
-                        "drive. It is a estimate, not the ECU's own figure, and it means less " +
-                        "on a diesel — a diesel runs unthrottled and breathes much the same at " +
-                        "a given speed whatever it is doing, so this reads more as effort than " +
-                        "as true load.",
+                    // Two different reasons the derived figure is on screen, and telling
+                    // the driver the wrong one is worse than telling them nothing. A car
+                    // that never offered the parameter is not the same as a car that
+                    // offered it and answered something impossible.
+                    text = loadUnusableReason
+                        ?: "This car's ECU doesn't report engine load, so the app works one " +
+                        "out from airflow and engine speed, learning this engine's range as " +
+                        "you drive. It is an estimate, not the ECU's own figure, and it " +
+                        "means less on a diesel — a diesel runs unthrottled and breathes " +
+                        "much the same at a given speed whatever it is doing, so this reads " +
+                        "more as effort than as true load.",
                 )
             }
         }
@@ -291,7 +311,7 @@ private fun gaugeMax(pid: Pid): Double = when (pid.id) {
     0x05 -> 130.0     // coolant
     0x5C -> 150.0     // oil temp
     0x0F -> 80.0      // intake air
-    0x42 -> 16.0      // control module voltage
+    0x42, PidRegistry.ADAPTER_VOLTAGE -> 16.0  // battery, from the car or from the adapter
     0x0B -> 255.0     // MAP
     0x10 -> 200.0     // MAF
     0xA6 -> 300000.0  // odometer
@@ -318,6 +338,9 @@ private fun gaugeMax(pid: Pid): Double = when (pid.id) {
  */
 private fun gaugeMin(pid: Pid): Double = when (pid.id) {
     0x05, 0x0F, 0x46, 0x5C, 0x67 -> 0.0   // temperatures
+    // A dead battery is 11 V and a healthy one 14.4, so a scale from zero puts the entire
+    // useful range in the last fifth of the sweep and the needle never appears to move.
+    0x42, PidRegistry.ADAPTER_VOLTAGE -> 8.0
     else -> pid.min
 }
 

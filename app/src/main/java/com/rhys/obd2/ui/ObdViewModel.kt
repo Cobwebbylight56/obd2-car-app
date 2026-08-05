@@ -55,6 +55,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     val isLogging get() = repository.tripLogger.isLogging
     val tripStats get() = repository.tripLogger.stats
     val loadEstimate get() = repository.loadEstimate
+    val loadUnusableReason get() = repository.loadUnusableReason
 
     val vehicles get() = repository.garage.vehicles
     val currentVehicle get() = repository.currentVehicle
