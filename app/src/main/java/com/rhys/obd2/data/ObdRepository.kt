@@ -40,6 +40,43 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * Whether readings are actually arriving, tracked separately from the connection.
+ *
+ * An open socket is not the same as a working link, and conflating them is what let the
+ * dashboard sit frozen: Bluetooth holds a connection to an adapter that has stopped
+ * answering, so every read times out while the connection still reports itself as up.
+ */
+sealed interface LinkState {
+    data object Idle : LinkState
+
+    /** Data is arriving. */
+    data object Live : LinkState
+
+    /** Nothing has come back for a while. Not yet given up on. */
+    data class Stalled(val since: Long, val lastReadingAt: Long) : LinkState
+
+    /** Actively trying to get it back. */
+    data class Recovering(val attempt: Int, val step: String) : LinkState
+
+    /** Recovery failed and the app has stopped trying by itself. */
+    data class Lost(val reason: String, val at: Long = System.currentTimeMillis()) : LinkState
+}
+
+/**
+ * The warning lights and fault counters the ECU is reporting, as a snapshot to compare.
+ *
+ * The engine management light is not something the app has to be asked to look for — it is
+ * a bit in service 01 PID 01, alongside the number of stored faults, and reading it costs
+ * one request. Polling it is the difference between noticing a light came on while the app
+ * was running and only finding out when somebody presses "read codes".
+ */
+data class WarningState(
+    val milOn: Boolean,
+    val storedCount: Int,
+    val at: Long = System.currentTimeMillis(),
+)
+
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState
     data class Connecting(val step: String) : ConnectionState
@@ -167,6 +204,36 @@ class ObdRepository(
     val garage = Garage(context)
 
     private val abnormalMonitor = AbnormalReadingMonitor()
+
+    /** Everything currently reading wrongly, plus what has recovered, for the Health screen. */
+    private val _findings = MutableStateFlow<List<Abnormality>>(emptyList())
+    val findings: StateFlow<List<Abnormality>> = _findings.asStateFlow()
+
+    /** The warning lights and stored-fault count the ECU is reporting right now. */
+    private val _warnings = MutableStateFlow<WarningState?>(null)
+    val warnings: StateFlow<WarningState?> = _warnings.asStateFlow()
+
+    private var lastWarningState: WarningState? = null
+    private var lastWarningCheck = 0L
+
+    /**
+     * Whether data is actually flowing, as distinct from whether a socket is open.
+     *
+     * These are not the same thing and treating them as the same is what let the app sit
+     * showing a frozen dashboard. Bluetooth will happily hold a socket open to an adapter
+     * that has stopped answering — walk out of range, or leave the car long enough for the
+     * ECU to go to sleep, and every read times out while the connection still reports
+     * itself as up. Nothing on screen changed, so nothing looked wrong.
+     */
+    private val _link = MutableStateFlow<LinkState>(LinkState.Idle)
+    val link: StateFlow<LinkState> = _link.asStateFlow()
+
+    private var lastGoodRead = 0L
+    private var consecutiveReadFailures = 0
+    private var recoveryJob: Job? = null
+
+    /** Set while a recovery is running, so the watchdog does not start a second one. */
+    private var recovering = false
     private val loadEstimator = LoadEstimator()
 
     /** The estimate's confidence and inputs, for the tile to state alongside the number. */
@@ -340,13 +407,20 @@ class ObdRepository(
 
         abnormalMonitor.reset()
 
+        lastGoodRead = System.currentTimeMillis()
+        _link.value = LinkState.Live
+
         scope.launch {
             discoverSupportedPids()
             // Identifying needs the VIN, so this waits for the service 09 read rather
             // than racing it — a car filed under "unidentified" and then again under its
             // VIN would split its own history in two.
             refreshVehicleInfo()
-            _currentVehicle.value = garage.identify(_vehicleInfo.value, device.address)
+            val vehicle = garage.identify(_vehicleInfo.value, device.address)
+            _currentVehicle.value = vehicle
+            // The diagnostic rules cannot judge this car until they know what has been
+            // changed on it, and that is only knowable once the car has been identified.
+            abnormalMonitor.setModifications(garage.modificationsFor(vehicle?.key))
         }
     }
 
@@ -367,6 +441,16 @@ class ObdRepository(
         implausibleLoadReads = 0
         _loadUnusableReason.value = null
         failureCounts.clear()
+        recoveryJob?.cancel()
+        recoveryJob = null
+        recovering = false
+        lastGoodRead = 0L
+        consecutiveReadFailures = 0
+        lastWarningState = null
+        lastWarningCheck = 0L
+        _warnings.value = null
+        _findings.value = emptyList()
+        _link.value = LinkState.Idle
         _liveData.value = emptyMap()
         _supportedPids.value = emptySet()
         _pollRate.value = 0.0
@@ -498,7 +582,16 @@ class ObdRepository(
                 // does not implement it, that is the whole session. The dashboard prefers
                 // the car's own figure whenever there is one.
                 if (pass % 4 == 0) readAdapterVoltage(session)
+
+                // The engine management light, checked without being asked. One request,
+                // and it is the difference between seeing a light come on while the app is
+                // running and finding out about it days later.
+                checkWarningLights(session)
+
                 pass++
+
+                // Whether anything is actually coming back.
+                watchTheLink()
 
                 val now = System.currentTimeMillis()
                 val elapsed = now - window
@@ -520,6 +613,264 @@ class ObdRepository(
         pollJob = null
         pollTargets = emptyList()
         _pollRate.value = 0.0
+        _link.value = LinkState.Idle
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Staying alive
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Decides whether the link is healthy, and starts a recovery when it is not.
+     *
+     * Judged on readings actually arriving rather than on the socket, because the socket
+     * lies. Walking away from the car, or leaving it long enough for the ECU to go to
+     * sleep, leaves Bluetooth holding an open connection to something that has stopped
+     * answering: every read times out, nothing on screen changes, and the app looks frozen
+     * rather than disconnected.
+     */
+    private fun watchTheLink() {
+        val now = System.currentTimeMillis()
+        if (lastGoodRead == 0L) lastGoodRead = now
+
+        val silence = now - lastGoodRead
+        when {
+            silence < STALL_MS -> {
+                if (_link.value !is LinkState.Recovering) _link.value = LinkState.Live
+            }
+            silence < GIVE_UP_MS -> {
+                if (_link.value !is LinkState.Recovering) {
+                    _link.value = LinkState.Stalled(since = now - silence, lastReadingAt = lastGoodRead)
+                }
+                if (!recovering) startRecovery("No reply for ${silence / 1000} seconds")
+            }
+            else -> if (!recovering) startRecovery("No reply for ${silence / 1000} seconds")
+        }
+    }
+
+    /**
+     * Tries progressively harder to get data flowing again, without tearing down the app.
+     *
+     * Three rungs, cheapest first, because most stalls are not the connection failing. A
+     * single confused adapter usually needs nothing more than the protocol re-selecting;
+     * only a genuinely dropped link needs the socket rebuilt, and rebuilding a socket that
+     * was fine costs ten seconds of dead gauges for nothing.
+     */
+    private fun startRecovery(reason: String) {
+        if (recovering) return
+        val device = settings.lastDevice ?: run {
+            _link.value = LinkState.Lost(reason)
+            return
+        }
+
+        recovering = true
+        recoveryJob?.cancel()
+        recoveryJob = scope.launch {
+            try {
+                noteComms("Connection interrupted", reason)
+
+                for (attempt in 1..RECOVERY_ATTEMPTS) {
+                    if (!isActive) return@launch
+
+                    val step = when (attempt) {
+                        1 -> "Waking the adapter"
+                        2 -> "Re-selecting the protocol"
+                        else -> "Reopening the connection"
+                    }
+                    _link.value = LinkState.Recovering(attempt, step)
+
+                    val recovered = when (attempt) {
+                        1 -> nudgeAdapter()
+                        2 -> reselectProtocol()
+                        else -> reopenConnection(AdapterDevice(device.name, device.address, device.kind))
+                    }
+
+                    if (recovered) {
+                        lastGoodRead = System.currentTimeMillis()
+                        consecutiveReadFailures = 0
+                        _link.value = LinkState.Live
+                        noteComms("Connection restored", "Recovered on attempt $attempt — $step.")
+                        // Everything the car told us before the gap may be stale, so the
+                        // parameter list and the warning lights are re-read rather than
+                        // assumed to have survived.
+                        runCatching { refreshAfterRecovery() }
+                        return@launch
+                    }
+                    delay(RECOVERY_BACKOFF_MS * attempt)
+                }
+
+                _link.value = LinkState.Lost(reason)
+                noteComms(
+                    "Connection lost",
+                    "Tried $RECOVERY_ATTEMPTS times and could not get the adapter answering " +
+                        "again. Use Reconnect once you are back at the car.",
+                )
+            } finally {
+                recovering = false
+            }
+        }
+    }
+
+    /** Cheapest rung: ask the adapter something only it has to answer. */
+    private suspend fun nudgeAdapter(): Boolean {
+        val session = elm ?: return false
+        if (transport?.isConnected != true) return false
+        return runCatching {
+            adapterLock.withLock { session.command("ATI") }.isNotBlank() &&
+                probeVehicle(session)
+        }.getOrDefault(false)
+    }
+
+    /** Middle rung: the adapter is alive but has lost the car. Re-run protocol selection. */
+    private suspend fun reselectProtocol(): Boolean {
+        val session = elm ?: return false
+        if (transport?.isConnected != true) return false
+        return runCatching {
+            adapterLock.withLock { session.command("ATSP0") }
+            probeVehicle(session)
+        }.getOrDefault(false)
+    }
+
+    /** Last rung: throw the socket away and build a new one. */
+    private suspend fun reopenConnection(device: AdapterDevice): Boolean {
+        val targets = pollTargets
+        runCatching { connect(device) }
+        val ok = _connectionState.value is ConnectionState.Connected
+        if (ok && targets.isNotEmpty()) startPolling(targets)
+        return ok
+    }
+
+    /** One cheap request the car has to answer for the link to count as working. */
+    private suspend fun probeVehicle(session: Elm327): Boolean =
+        adapterLock.withLock { session.obd(0x01, PID_RPM, expectedResponses = 1) }.isSuccess
+
+    private suspend fun refreshAfterRecovery() {
+        if (_supportedPids.value.isEmpty()) discoverSupportedPids()
+        elm?.let { checkWarningLights(it, force = true) }
+    }
+
+    /**
+     * Manual reconnect, for when the driver is back at the car before the app has noticed.
+     *
+     * Deliberately runs the same ladder as the automatic recovery rather than a separate
+     * path, so the button does exactly what the app does on its own and there is only one
+     * behaviour to reason about.
+     */
+    /**
+     * Re-reads the current car's declared modifications into the diagnostic rules.
+     *
+     * Called after the owner changes them, so blanking the EGR stops a false EGR fault
+     * immediately rather than at the next connection.
+     */
+    fun applyModifications() {
+        abnormalMonitor.setModifications(garage.modificationsFor(_currentVehicle.value?.key))
+    }
+
+    fun reconnect() {
+        recovering = false
+        recoveryJob?.cancel()
+        lastGoodRead = 0L
+        startRecovery("Reconnect requested")
+    }
+
+    private fun noteComms(title: String, detail: String) {
+        Log.i(TAG, "$title: $detail")
+        _currentVehicle.value?.let { vehicle ->
+            garage.record(
+                vehicle.key,
+                VehicleHistoryEvent(
+                    timestamp = System.currentTimeMillis(),
+                    type = EventType.COMMS,
+                    title = title,
+                    detail = detail,
+                ),
+            )
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Warning lights
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Reads the malfunction indicator lamp and stored-fault count, and records changes.
+     *
+     * Service 01 PID 01 carries both: the top bit of the first byte is the lamp, the rest
+     * of that byte is how many faults are stored. It costs one request, so it is checked on
+     * a timer rather than only when somebody presses "read codes" — which is the difference
+     * between the app noticing a light come on while it was running and never noticing at
+     * all.
+     *
+     * Only transitions are recorded. A light that has been on for a fortnight is one event,
+     * not one every thirty seconds.
+     */
+    private suspend fun checkWarningLights(session: Elm327, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastWarningCheck < WARNING_CHECK_MS) return
+        lastWarningCheck = now
+
+        val result = runCatching {
+            adapterLock.withLock { session.obd(0x01, 0x01, expectedResponses = 1) }
+        }.getOrNull() ?: return
+        if (!result.isSuccess || result.data.isEmpty()) return
+
+        val state = WarningState(
+            milOn = result.data[0] and 0x80 != 0,
+            storedCount = result.data[0] and 0x7F,
+        )
+        _warnings.value = state
+
+        val previous = lastWarningState
+        lastWarningState = state
+        if (previous == null) {
+            // First look of the session. A light already on is still worth saying, because
+            // the driver may not have noticed it either.
+            if (state.milOn) {
+                recordWarning(
+                    "Engine management light is on",
+                    "The ECU is reporting ${state.storedCount} stored fault" +
+                        (if (state.storedCount == 1) "" else "s") +
+                        ". Read the codes to see what it is.",
+                )
+            }
+            return
+        }
+
+        if (state.milOn && !previous.milOn) {
+            recordWarning(
+                "Engine management light came on",
+                "It lit while the app was connected, so whatever caused it happened just " +
+                    "now. The ECU is reporting ${state.storedCount} stored fault" +
+                    (if (state.storedCount == 1) "" else "s") + ".",
+            )
+            // A new light means new codes, and reading them now captures the freeze frame
+            // while the conditions that set it are still current.
+            scope.launch { runCatching { refreshDtcs() } }
+        } else if (!state.milOn && previous.milOn) {
+            recordWarning(
+                "Engine management light went out",
+                "The ECU has stopped reporting an active fault. On most cars a light goes " +
+                    "out by itself after several clean journeys, which means the fault has " +
+                    "not recurred — not that it is fixed.",
+            )
+        } else if (state.storedCount > previous.storedCount) {
+            recordWarning(
+                "New fault stored",
+                "The stored fault count went from ${previous.storedCount} to " +
+                    "${state.storedCount} while the app was connected.",
+            )
+            scope.launch { runCatching { refreshDtcs() } }
+        }
+    }
+
+    private fun recordWarning(title: String, detail: String) {
+        Log.i(TAG, "Warning: $title")
+        _currentVehicle.value?.let { vehicle ->
+            garage.record(
+                vehicle.key,
+                VehicleHistoryEvent(System.currentTimeMillis(), EventType.WARNING, title, detail),
+            )
+        }
     }
 
     private suspend fun readAndStore(session: Elm327, pidId: Int) {
@@ -530,6 +881,12 @@ class ObdRepository(
 
         if (!result.isSuccess) {
             if (result.error == ObdError.NOT_CONNECTED) return
+            // One parameter failing is a parameter problem; every parameter failing at once
+            // is a link problem, and only the second is worth reconnecting for. Counting
+            // them separately is what keeps a single stubborn PID from triggering a
+            // reconnect, and a genuinely dead link from being mistaken for one.
+            consecutiveReadFailures++
+
             // NO_DATA on a PID the car claimed to support means it over-reported.
             // Retire it after a few tries rather than burning bandwidth forever.
             val count = (failureCounts[pidId] ?: 0) + 1
@@ -542,6 +899,9 @@ class ObdRepository(
             return
         }
 
+        // Something came back, so the link is alive whatever the value turns out to be.
+        lastGoodRead = System.currentTimeMillis()
+        consecutiveReadFailures = 0
         failureCounts.remove(pidId)
 
         // A parameter pinned to full scale forever is a stub, not a sensor.
@@ -593,21 +953,7 @@ class ObdRepository(
 
         // A reading outside its healthy range is worth a dated note in the car's history,
         // whether or not the ECU ever considers it bad enough to store a code.
-        readings.firstOrNull()?.let { primary ->
-            abnormalMonitor.observe(pidId, primary.value)?.let { abnormal ->
-                _currentVehicle.value?.let { vehicle ->
-                    garage.record(
-                        vehicle.key,
-                        VehicleHistoryEvent(
-                            timestamp = now,
-                            type = EventType.ABNORMAL,
-                            title = "${abnormal.label}: ${"%.1f".format(java.util.Locale.UK, abnormal.value)} ${abnormal.unit}".trim(),
-                            detail = "${abnormal.severity.label}. ${abnormal.message}",
-                        ),
-                    )
-                }
-            }
-        }
+        readings.firstOrNull()?.let { primary -> judge(pidId, primary.value, now) }
 
         _liveData.update { current ->
             val previous = current[pidId]
@@ -662,6 +1008,59 @@ class ObdRepository(
                 "so the standard's load figure sits near 100% however it is driven. The " +
                 "figure below is worked out from airflow instead."
         Log.i(TAG, "Calculated load ruled unusable: $percent% at ${rpm?.toInt()} rpm, stationary")
+    }
+
+    /**
+     * Puts one reading past the diagnostic rules and files anything that changed.
+     *
+     * The monitor returns something only on a genuine transition — a fault confirmed after
+     * several consecutive bad readings, or one cleared after several good ones — so this
+     * writes at most two lines to a car's history per fault per session rather than one per
+     * reading. Readings a declared modification accounts for are still recorded, marked
+     * with the modification that explains them: going quiet about them would leave the
+     * owner unable to tell "expected on this car" from "the app is not looking".
+     */
+    private fun judge(pidId: Int, value: Double, now: Long) {
+        val event = abnormalMonitor.observe(pidId, value)
+        _findings.value = abnormalMonitor.findings
+        val abnormal = event ?: return
+
+        val vehicle = _currentVehicle.value ?: return
+        val reading = "${"%.1f".format(java.util.Locale.UK, abnormal.value)} ${abnormal.unit}".trim()
+
+        val (type, title, lead) = if (abnormal.active) {
+            Triple(
+                EventType.ABNORMAL,
+                "${abnormal.label}: $reading",
+                abnormal.explainedBy?.let { "Expected on this car — $it." }
+                    ?: "${abnormal.severity.label}.",
+            )
+        } else {
+            Triple(
+                EventType.RECOVERED,
+                "${abnormal.label} back to normal",
+                "Was ${abnormal.severity.label.lowercase()} for " +
+                    "${abnormal.durationMs / 1000} seconds across " +
+                    "${abnormal.occurrences} reading${if (abnormal.occurrences == 1) "" else "s"}.",
+            )
+        }
+
+        garage.record(
+            vehicle.key,
+            VehicleHistoryEvent(
+                timestamp = now,
+                type = type,
+                title = title,
+                detail = buildString {
+                    append(lead)
+                    abnormal.expected?.let {
+                        append("\n\nExpected ${it.text} ${it.whenApplies}. Read $reading.")
+                    }
+                    append("\n\n${abnormal.message}")
+                    abnormal.corroboration?.let { append("\n\n$it") }
+                },
+            ),
+        )
     }
 
     /** True once it is settled that this car will not report a usable calculated load. */
@@ -728,9 +1127,19 @@ class ObdRepository(
      */
     private fun updateLoadEstimate(now: Long) {
         val values = _liveData.value
+        // Best available source, in order. Airflow is a real measurement of what the engine
+        // is swallowing; manifold pressure is the same quantity inferred, and is what a
+        // turbo diesel that will not report airflow still gives you; throttle position is a
+        // request rather than a result and is last for that reason — on the Freelander it
+        // is a flat zero however the car is driven, which is why falling straight to it
+        // produced a gauge pinned at nothing.
         val estimate = loadEstimator.fromAirflow(
             mafGramsPerSecond = values[PID_MAF]?.primary?.value,
             rpm = values[PID_RPM]?.primary?.value,
+        ) ?: loadEstimator.fromPressure(
+            mapKilopascals = values[PID_MAP]?.primary?.value,
+            rpm = values[PID_RPM]?.primary?.value,
+            intakeAirC = values[PID_INTAKE_AIR]?.primary?.value,
         ) ?: loadEstimator.fromThrottle(values[PID_THROTTLE]?.primary?.value)
         ?: return
 
@@ -1189,6 +1598,8 @@ class ObdRepository(
         const val PID_RPM = 0x0C
         const val PID_THROTTLE = 0x11
         const val PID_SPEED = 0x0D
+        const val PID_MAP = 0x0B
+        const val PID_INTAKE_AIR = 0x0F
 
         /** An engine turning but not being driven. */
         const val MIN_RUNNING_RPM = 300.0
@@ -1204,6 +1615,25 @@ class ObdRepository(
         const val IMPLAUSIBLE_LOAD_PERCENT = 92.0
         const val IMPLAUSIBLE_LOAD_READS = 6
 
+        /**
+         * How long without a single reading before the link counts as stalled.
+         *
+         * Generous on purpose. A pre-CAN car on a slow initialisation, or a foreground code
+         * read, can legitimately go several seconds without the polling loop landing
+         * anything, and an app that announces a problem every time the bus is busy is an
+         * app whose warnings get ignored.
+         */
+        private const val STALL_MS = 12_000L
+
+        /** Past this, the link is not merely busy. */
+        private const val GIVE_UP_MS = 30_000L
+
+        private const val RECOVERY_ATTEMPTS = 3
+        private const val RECOVERY_BACKOFF_MS = 2_000L
+
+        /** How often the engine management light is checked. One request each time. */
+        private const val WARNING_CHECK_MS = 20_000L
+
         /** First decimal number in the adapter's ATRV reply. */
         private val VOLTAGE_PATTERN = Regex("""\d{1,2}\.\d+""")
 
@@ -1217,7 +1647,7 @@ class ObdRepository(
          * shape. All three are polled when the estimate is in use, because which of them
          * the car will actually answer is not known until it has been asked.
          */
-        private val LOAD_INPUTS = listOf(PID_MAF, PID_RPM, PID_THROTTLE)
+        private val LOAD_INPUTS = listOf(PID_MAF, PID_RPM, PID_MAP, PID_INTAKE_AIR, PID_THROTTLE)
 
         /**
          * Parameters that change over minutes rather than moments.

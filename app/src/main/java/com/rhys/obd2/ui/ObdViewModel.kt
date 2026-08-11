@@ -8,6 +8,7 @@ import com.rhys.obd2.data.ConnectionState
 import com.rhys.obd2.data.DiagnosticReport
 import com.rhys.obd2.data.ObdForegroundService
 import com.rhys.obd2.data.Garage
+import com.rhys.obd2.data.Modification
 import com.rhys.obd2.data.ObdRepository
 import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.obd.PidRegistry
@@ -56,6 +57,44 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     val tripStats get() = repository.tripLogger.stats
     val loadEstimate get() = repository.loadEstimate
     val loadUnusableReason get() = repository.loadUnusableReason
+    val findings get() = repository.findings
+    val warnings get() = repository.warnings
+    val link get() = repository.link
+
+    // ---------------------------------------------------------------------------------
+    // Modifications
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Declares a part removed, blanked, disabled or changed, and applies it immediately.
+     *
+     * Applied rather than merely stored, so blanking the EGR stops a false EGR fault on
+     * the next reading rather than at the next connection.
+     */
+    fun setModification(key: String, modification: Modification) {
+        repository.garage.setModification(key, modification)
+        repository.applyModifications()
+    }
+
+    fun clearModification(key: String, componentId: String) {
+        repository.garage.clearModification(key, componentId)
+        repository.applyModifications()
+    }
+
+    /** Asks the app to get the link working again without waiting for it to notice. */
+    fun reconnect() = repository.reconnect()
+
+    /**
+     * The declared modification that accounts for a fault code, described in words.
+     *
+     * Null when nothing explains it, which is the normal case and means the code should be
+     * treated exactly as seriously as it looks.
+     */
+    fun modificationExplaining(code: String): String? {
+        val mods = repository.garage.modificationsFor(currentVehicle.value?.key)
+        val (mod, component) = mods.explains(code) ?: return null
+        return mods.describe(mod, component)
+    }
 
     val vehicles get() = repository.garage.vehicles
     val currentVehicle get() = repository.currentVehicle

@@ -62,6 +62,9 @@ fun ReadinessScreen(
     val readiness by viewModel.readiness.collectAsState()
     val codes by viewModel.dtcs.collectAsState()
     val busy by viewModel.busy.collectAsState()
+    val findings by viewModel.findings.collectAsState()
+    val warnings by viewModel.warnings.collectAsState()
+    val link by viewModel.link.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -72,17 +75,26 @@ fun ReadinessScreen(
         item {
             Spacer(Modifier.height(12.dp))
             ScreenHeader(
-                title = "Emissions health",
-                subtitle = "Readiness monitors and self-test results",
+                title = "Health",
+                subtitle = "Warning lights, live readings and emissions readiness",
             ) {
                 if (busy != null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
         }
 
         if (connection !is ConnectionState.Connected) {
-            item { ExplainerCard(tone = Tone.INFO, text = "Connect to the car to check emissions readiness.") }
+            item { ExplainerCard(tone = Tone.INFO, text = "Connect to the car to check its health.") }
             return@LazyColumn
         }
+
+        // Ordered by how soon it matters. The link comes first because nothing below it
+        // means anything if the numbers stopped arriving ten minutes ago; then anything
+        // the car is actively complaining about; then what the readings themselves show;
+        // and only then the emissions self-tests, which are a question about next year's
+        // MOT rather than about today.
+        item { LinkStatusCard(link) { viewModel.reconnect() } }
+        item { WarningLightsCard(warnings) }
+        item { LiveFindingsCard(findings) }
 
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

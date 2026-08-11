@@ -244,7 +244,15 @@ fun DtcScreen(viewModel: ObdViewModel, onLookup: () -> Unit) {
 @Composable
 private fun DtcCard(dtc: Dtc, viewModel: ObdViewModel) {
     var expanded by remember { mutableStateOf(false) }
-    val tone = severityTone(dtc.severity)
+
+    // A code a declared modification accounts for is not a fault on this car. It is still
+    // listed — hiding it would leave the owner unable to tell "expected" from "the app
+    // stopped looking" — but it drops to neutral and says which change explains it, so it
+    // does not sit at the top of the list in red for the rest of the car's life.
+    val explained = remember(dtc.code, viewModel.currentVehicle.value?.key) {
+        viewModel.modificationExplaining(dtc.code)
+    }
+    val tone = if (explained != null) Tone.NEUTRAL else severityTone(dtc.severity)
 
     // Two things the car itself cannot tell you.
     //
@@ -280,9 +288,19 @@ private fun DtcCard(dtc: Dtc, viewModel: ObdViewModel) {
                 )
             }
 
+            explained?.let {
+                Spacer(Modifier.height(8.dp))
+                ExplainerCard(
+                    tone = Tone.NEUTRAL,
+                    text = "Expected on this car — $it. This code will set and stay set for " +
+                        "as long as that is the case, and is not evidence of a fault. It " +
+                        "will still fail an MOT emissions test.",
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusPill(dtc.severity.label, tone)
+                StatusPill(if (explained != null) "Expected" else dtc.severity.label, tone)
                 if (previous.size > 1) {
                     Spacer(Modifier.width(6.dp))
                     StatusPill("Seen ${previous.size}×", Tone.WARNING)

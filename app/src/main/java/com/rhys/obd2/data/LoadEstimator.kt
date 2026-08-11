@@ -48,6 +48,8 @@ class LoadEstimator {
 
     private var peakAirPerRev = 0.0
     private var idleAirPerRev = Double.MAX_VALUE
+    private var peakDensity = 0.0
+    private var idleDensity = Double.MAX_VALUE
     private var samples = 0
 
     /** Highest air-per-revolution seen, exposed for the diagnostic report. */
@@ -59,6 +61,8 @@ class LoadEstimator {
     fun reset() {
         peakAirPerRev = 0.0
         idleAirPerRev = Double.MAX_VALUE
+        peakDensity = 0.0
+        idleDensity = Double.MAX_VALUE
         samples = 0
     }
 
@@ -100,6 +104,58 @@ class LoadEstimator {
     }
 
     /**
+     * Second choice: manifold pressure and engine speed, PIDs 0B and 0C.
+     *
+     * Where a car does not report airflow, it very often reports manifold pressure, and the
+     * two are related — the speed-density method every ECU without an airflow meter uses.
+     * Air mass per revolution is proportional to manifold absolute pressure divided by
+     * intake air temperature in kelvin, so the same learned floor and ceiling work on it.
+     *
+     * **This is what a Freelander Td4 needs.** Its throttle reading is a flat 0.00% however
+     * it is driven, because a diesel has no throttle plate — only an anti-shudder flap that
+     * sits open. Falling straight from airflow to throttle gave a gauge pinned at zero,
+     * which is no more use than the 100% it replaced. Boost pressure, on a turbo diesel, is
+     * very nearly a direct measure of how hard it is working.
+     *
+     * @param mapKilopascals manifold absolute pressure, PID 0B.
+     * @param rpm engine speed, PID 0C.
+     * @param intakeAirC intake air temperature, PID 0F. Optional: the correction it makes
+     *   is small compared with the pressure swing, so a car that will not report it still
+     *   gets a usable figure rather than none.
+     */
+    fun fromPressure(
+        mapKilopascals: Double?,
+        rpm: Double?,
+        intakeAirC: Double? = null,
+    ): Estimate? {
+        if (mapKilopascals == null || rpm == null) return null
+        if (rpm < MIN_RPM || mapKilopascals <= 0.0) return null
+
+        val kelvin = ((intakeAirC ?: DEFAULT_INTAKE_C) + 273.15).coerceAtLeast(200.0)
+        val density = mapKilopascals / kelvin
+
+        if (density > peakDensity) peakDensity = density
+        if (density < idleDensity) idleDensity = density
+        samples++
+
+        val span = peakDensity - idleDensity
+        if (span < MIN_DENSITY_SPAN) {
+            return Estimate(0.0, Confidence.LEARNING, "boost pressure and engine speed")
+        }
+
+        return Estimate(
+            percent = ((density - idleDensity) / span * 100.0).coerceIn(0.0, 100.0),
+            confidence = when {
+                samples < LEARNING_SAMPLES -> Confidence.LEARNING
+                else -> Confidence.FAIR
+            },
+            // Never GOOD. Pressure is a good proxy and it is still a proxy — it does not
+            // know how much fuel is being injected, which on a diesel is what load is.
+            basis = "boost pressure and engine speed",
+        )
+    }
+
+    /**
      * Last resort: the accelerator or throttle position, PID 11.
      *
      * A genuinely poor substitute and labelled as one. Pedal position is a request, not a
@@ -131,5 +187,17 @@ class LoadEstimator {
          * outside sensor noise and small enough that one brisk pull-away establishes it.
          */
         const val MIN_SPAN = 0.0005
+
+        /**
+         * Assumed intake air temperature when the car will not report it.
+         *
+         * Twenty degrees. The correction it makes is a few per cent across a realistic
+         * range, against a pressure swing of two or three to one on a turbo engine, so
+         * assuming it is far better than refusing to produce a figure without it.
+         */
+        const val DEFAULT_INTAKE_C = 20.0
+
+        /** In kPa per kelvin. An idling diesel sits near 0.11; on full boost, near 0.7. */
+        const val MIN_DENSITY_SPAN = 0.02
     }
 }

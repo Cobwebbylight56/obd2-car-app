@@ -74,6 +74,7 @@ fun DashboardScreen(
     val supported by viewModel.supportedPids.collectAsState()
     val loadEstimate by viewModel.loadEstimate.collectAsState()
     val loadUnusableReason by viewModel.loadUnusableReason.collectAsState()
+    val link by viewModel.link.collectAsState()
     val showOdometer by viewModel.settings.showOdometer.collectAsState()
 
     val odometerKm = live[0xA6]?.primary?.value
@@ -153,6 +154,14 @@ fun DashboardScreen(
                     units = units,
                     rollback = rollback,
                 )
+            }
+        }
+
+        // Above everything, because a frozen gauge is indistinguishable from a steady one
+        // and the driver has no other way to tell. Draws nothing while data is flowing.
+        if (link !is LinkState.Idle && link !is LinkState.Live) {
+            item(span = { GridItemSpan(2) }) {
+                LinkStatusCard(link) { viewModel.reconnect() }
             }
         }
 
@@ -266,6 +275,7 @@ private fun GaugeTile(
                 warningThreshold = warn,
                 dangerThreshold = danger,
                 optimalRange = optimalRange(pid.id),
+                coldAnchor = coldAnchor(pid.id),
                 modifier = Modifier.fillMaxWidth(),
             )
             footnote?.let {
@@ -348,14 +358,35 @@ private fun optimalRange(pidId: Int): ClosedFloatingPointRange<Float>? = when (p
     0x05 -> 82f..105f    // engine coolant
     0x5C -> 80f..115f    // engine oil
     0x67 -> 82f..105f    // coolant, secondary sensor
+    // Battery voltage is not "more is worse" and treating it that way turned a perfectly
+    // healthy 13.5 V amber — the alternator doing exactly its job, coloured as a warning.
+    // It has a wrong end at the bottom, like a temperature: below 12 is a flat battery or
+    // a dead alternator, 13.5 to 14.8 is charging properly, and above 15 is overcharging.
+    0x42, PidRegistry.ADAPTER_VOLTAGE -> 13.2f..14.8f
     else -> null
+}
+
+/**
+ * Where the low end of a both-ends-matter gauge is fully "wrong".
+ *
+ * For a coolant temperature that is 40 °C — a cold engine. For a battery it is 11.5 V,
+ * below which the car is not going to start. They share a gauge shape and nothing else,
+ * so the anchor travels with the parameter rather than being baked into the component.
+ */
+private fun coldAnchor(pidId: Int): Float = when (pidId) {
+    0x42, PidRegistry.ADAPTER_VOLTAGE -> 11.5f
+    else -> 40f
 }
 
 private fun thresholds(pidId: Int): Pair<Float?, Float?> = when (pidId) {
     0x05 -> 105f to 115f          // coolant temperature
     0x5C -> 120f to 135f          // oil temperature
     0x0C -> 5500f to 6500f        // RPM
-    0x42 -> null to null          // voltage needs a low-side check the gauge can't express
+    // Voltage is handled by optimalRange instead: it has a wrong end at both ends, so a
+    // pair of "above this is bad" thresholds cannot express it. 15.2 is where overcharging
+    // starts and is passed as the danger end so the arc reaches red there rather than at
+    // the top of the dial.
+    0x42, PidRegistry.ADAPTER_VOLTAGE -> null to 15.2f
     else -> null to null
 }
 

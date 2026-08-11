@@ -104,6 +104,15 @@ fun Gauge(
     warningThreshold: Float? = null,
     dangerThreshold: Float? = null,
     optimalRange: ClosedFloatingPointRange<Float>? = null,
+    /**
+     * The value at or below which the low end of an [optimalRange] gauge is fully blue.
+     *
+     * Defaults to a temperature, because temperatures are what this shape of gauge was
+     * built for. Battery voltage has the same shape — wrong at both ends, right in the
+     * middle — but its cold end is 11.5 V, not 40, and leaving the temperature default in
+     * place would paint every possible voltage the "stone cold" colour.
+     */
+    coldAnchor: Float = COLD_ANCHOR,
 ) {
     val range = (max - min).takeIf { it > 0f } ?: 1f
     val fraction = ((value - min) / range).coerceIn(0f, 1f)
@@ -154,9 +163,9 @@ fun Gauge(
             val hotTo = dangerThreshold ?: (optimalTo + 10f)
             when {
                 // Fully cold below the point where an engine is unambiguously not warm.
-                value <= COLD_ANCHOR -> cold
+                value <= coldAnchor -> cold
                 value < warmFrom ->
-                    lerp(cold, accent, ((value - COLD_ANCHOR) / (warmFrom - COLD_ANCHOR)).coerceIn(0f, 1f))
+                    lerp(cold, accent, ((value - coldAnchor) / (warmFrom - coldAnchor)).coerceIn(0f, 1f))
                 value <= optimalTo -> accent
                 value < hotTo ->
                     lerp(warning, danger, ((value - optimalTo) / (hotTo - optimalTo)).coerceIn(0f, 1f))

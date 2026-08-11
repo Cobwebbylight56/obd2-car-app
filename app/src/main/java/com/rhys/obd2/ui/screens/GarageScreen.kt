@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DirectionsCar
@@ -51,6 +52,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rhys.obd2.data.EventType
+import com.rhys.obd2.data.ModKind
+import com.rhys.obd2.data.ModifiableComponent
+import com.rhys.obd2.data.Modification
+import com.rhys.obd2.data.ModificationCatalogue
 import com.rhys.obd2.data.Vehicle
 import com.rhys.obd2.data.VehicleHistoryEvent
 import com.rhys.obd2.ui.ObdViewModel
@@ -74,6 +79,11 @@ import androidx.compose.ui.platform.LocalContext
 import com.rhys.obd2.obd.IssueConfidence
 import com.rhys.obd2.obd.KnownIssues
 import com.rhys.obd2.ui.ExportFormat
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
 
 /**
  * Per-car history that survives the car's own memory.
@@ -97,6 +107,7 @@ fun GarageScreen(viewModel: ObdViewModel) {
     var deletingEvent by remember { mutableStateOf<VehicleHistoryEvent?>(null) }
     var exporting by remember { mutableStateOf(false) }
     var pickingModel by remember { mutableStateOf(false) }
+    var editingMod by remember { mutableStateOf<ModifiableComponent?>(null) }
     val context = LocalContext.current
     val revision by viewModel.historyRevision.collectAsState()
 
@@ -261,6 +272,14 @@ fun GarageScreen(viewModel: ObdViewModel) {
             }
         }
 
+        item {
+            ModificationsCard(
+                modifications = vehicle.modifications,
+                onEdit = { editingMod = it },
+                onClear = { viewModel.clearModification(vehicle.key, it) },
+            )
+        }
+
         vehicle.modelId?.let { id ->
             KnownIssues.byId(id)?.let { model ->
                 item {
@@ -360,6 +379,27 @@ fun GarageScreen(viewModel: ObdViewModel) {
             },
             dismissButton = { TextButton(onClick = { clearingHistory = false }) { Text("Cancel") } },
         )
+    }
+
+    editingMod?.let { component ->
+        if (selected != null) {
+            ModificationDialog(
+                component = component,
+                current = selected.modifications.firstOrNull { it.componentId == component.id },
+                onDismiss = { editingMod = null },
+                onConfirm = { kind, note ->
+                    editingMod = null
+                    viewModel.setModification(
+                        selected.key,
+                        Modification(componentId = component.id, kind = kind, note = note),
+                    )
+                },
+                onRemove = {
+                    editingMod = null
+                    viewModel.clearModification(selected.key, component.id)
+                },
+            )
+        }
     }
 
     if (pickingModel && selected != null) {
@@ -507,6 +547,10 @@ private fun presentation(type: EventType): Pair<ImageVector, Tone> = when (type)
     EventType.CODES_FOUND -> Icons.Filled.Warning to Tone.DANGER
     EventType.CODES_CLEARED -> Icons.Filled.DeleteSweep to Tone.WARNING
     EventType.ABNORMAL -> Icons.Filled.Bolt to Tone.WARNING
+    EventType.RECOVERED -> Icons.Filled.CheckCircle to Tone.ACCENT
+    EventType.WARNING -> Icons.Filled.Warning to Tone.DANGER
+    EventType.COMMS -> Icons.Filled.Link to Tone.NEUTRAL
+    EventType.MODIFICATION -> Icons.Filled.Build to Tone.INFO
     EventType.TRIP -> Icons.Filled.Timeline to Tone.ACCENT
     EventType.MILEAGE -> Icons.Filled.Speed to Tone.INFO
     EventType.NOTE -> Icons.Filled.DirectionsCar to Tone.INFO
@@ -747,4 +791,230 @@ private fun shareHistory(context: android.content.Context, file: java.io.File, f
         }
         context.startActivity(android.content.Intent.createChooser(intent, "Share vehicle history"))
     }
+}
+
+// -------------------------------------------------------------------------------------
+// Modifications
+// -------------------------------------------------------------------------------------
+
+/**
+ * What has been changed on this car, and the way in.
+ *
+ * This exists because a diagnostic app that only knows the factory specification is wrong
+ * about every modified car, and confidently so. A blanked EGR reports an error it cannot
+ * help; a de-catted car sets P0420 forever. Without being told, the app has no way to
+ * distinguish those from faults, and an app that cries wolf on every journey is one whose
+ * warnings stop being read.
+ *
+ * Declared parts are listed first with what to expect from them, because the useful thing
+ * is not that the app has gone quiet — it is knowing what the readings should now look
+ * like instead.
+ */
+@Composable
+private fun ModificationsCard(
+    modifications: List<Modification>,
+    onEdit: (ModifiableComponent) -> Unit,
+    onClear: (String) -> Unit,
+) {
+    var showAll by remember { mutableStateOf(false) }
+    val declared = modifications.mapNotNull { mod ->
+        ModificationCatalogue[mod.componentId]?.let { mod to it }
+    }
+
+    SectionCard(
+        title = "Modified or removed parts",
+        subtitle = if (declared.isEmpty()) "Everything assumed standard"
+        else "${declared.size} declared",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ExplainerCard(
+                tone = Tone.INFO,
+                text = "Tell the app what has been changed and it stops treating the " +
+                    "consequences as faults. A blanked EGR reports an error it cannot help, " +
+                    "and a de-catted car sets P0420 for the rest of its life — neither is a " +
+                    "problem, and an app that flags them every journey is one you stop " +
+                    "reading. The readings are still shown and still recorded; what changes " +
+                    "is whether they count against the car.",
+            )
+
+            declared.forEach { (mod, component) ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onEdit(component) }
+                        .padding(vertical = 6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            component.name,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        StatusPill(mod.kind.label, Tone.WARNING)
+                    }
+                    if (mod.note.isNotBlank()) {
+                        Text(
+                            mod.note,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    if (component.expectedInstead.isNotBlank()) {
+                        Text(
+                            component.expectedInstead,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    Text(
+                        "Back to standard",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .clickable { onClear(component.id) }
+                            .padding(top = 6.dp, bottom = 2.dp),
+                    )
+                }
+            }
+
+            val undeclared = ModificationCatalogue.all
+                .filter { component -> declared.none { it.second.id == component.id } }
+            val offered = if (showAll) undeclared else undeclared.take(4)
+
+            Text(
+                if (declared.isEmpty()) "Add a modification" else "Add another",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            offered.forEach { component ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onEdit(component) }
+                        .heightIn(min = 48.dp)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(component.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Add",
+                        color = Tone.ACCENT.color(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            if (undeclared.size > offered.size || showAll) {
+                Text(
+                    if (showAll) "Show fewer" else "Show all ${undeclared.size}",
+                    color = Tone.ACCENT.color(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .clickable { showAll = !showAll }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Declares one component changed, and in what way.
+ *
+ * The kind is asked for rather than assumed because it changes what the app should expect.
+ * A blanked EGR is still fitted and still reports a position; a removed one reports
+ * nothing. Both stop the flow-related codes meaning anything, and only one leaves a
+ * believable position reading behind.
+ */
+@Composable
+private fun ModificationDialog(
+    component: ModifiableComponent,
+    current: Modification?,
+    onDismiss: () -> Unit,
+    onConfirm: (ModKind, String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    var kind by remember(component.id) { mutableStateOf(current?.kind ?: component.kinds.first()) }
+    var note by remember(component.id) { mutableStateOf(current?.note.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(component.name) },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    component.what,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Text("What was done to it", style = MaterialTheme.typography.labelMedium)
+                component.kinds.forEach { option ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = kind == option,
+                                role = Role.RadioButton,
+                                onClick = { kind = option },
+                            )
+                            .heightIn(min = 48.dp)
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = kind == option, onClick = null)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                option.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note (optional)") },
+                    placeholder = { Text("When, who did it, which parts") },
+                    singleLine = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (component.expectedInstead.isNotBlank()) {
+                    ExplainerCard(tone = Tone.INFO, text = component.expectedInstead)
+                }
+
+                if (component.affectedCodes.isNotEmpty()) {
+                    Text(
+                        "Fault codes that will stop counting against this car: " +
+                            component.affectedCodes.joinToString(", ") + ". They are still " +
+                            "shown, marked as expected rather than hidden.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(kind, note.trim()) }) {
+                Text(if (current == null) "Add" else "Save")
+            }
+        },
+        dismissButton = {
+            if (current == null) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            } else {
+                TextButton(onClick = onRemove) { Text("Back to standard") }
+            }
+        },
+    )
 }

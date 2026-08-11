@@ -14,6 +14,14 @@ enum class EventType(val label: String) {
     CODES_FOUND("Fault codes"),
     CODES_CLEARED("Codes cleared"),
     ABNORMAL("Unusual reading"),
+    /** A reading that had been abnormal returning to where it should be. */
+    RECOVERED("Back to normal"),
+    /** The engine management light, or another warning the ECU raised. */
+    WARNING("Warning light"),
+    /** The adapter or the car stopped answering, and whether it came back. */
+    COMMS("Connection"),
+    /** Something declared removed, blanked, disabled or otherwise changed. */
+    MODIFICATION("Modification"),
     TRIP("Trip recorded"),
     MILEAGE("Mileage"),
     NOTE("Note"),
@@ -60,6 +68,15 @@ data class Vehicle(
     val lastSeen: Long = System.currentTimeMillis(),
     /** Which entry in the known-issues list the owner picked, if any. */
     val modelId: String? = null,
+    /**
+     * Parts the owner has declared removed, blanked, disabled or changed.
+     *
+     * Kept on the car rather than in app settings because it is a fact about this car and
+     * has to survive plugging into a different one — the whole point is that the app stops
+     * calling a blanked EGR a fault on the Freelander without going quiet about a genuinely
+     * faulty one on anything else.
+     */
+    val modifications: List<Modification> = emptyList(),
     /** Codes present at the last read, so a repeat read doesn't log a duplicate entry. */
     val lastCodes: Set<String> = emptySet(),
 ) {
@@ -174,6 +191,64 @@ class Garage(private val context: Context) {
         val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
         save(vehicle.copy(modelId = modelId))
         refresh()
+    }
+
+    /**
+     * Declares a part removed, blanked, disabled or otherwise changed.
+     *
+     * Recorded in the history as well as on the car, because when a modification was
+     * declared is itself diagnostic: a fault that started the week the EGR was blanked and
+     * a fault that started two years later are different stories.
+     */
+    fun setModification(key: String, modification: Modification) {
+        val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
+        val existing = vehicle.modifications.firstOrNull { it.componentId == modification.componentId }
+        if (existing?.kind == modification.kind && existing.note == modification.note) return
+
+        val others = vehicle.modifications.filterNot { it.componentId == modification.componentId }
+        save(vehicle.copy(modifications = others + modification))
+
+        val component = ModificationCatalogue[modification.componentId]
+        record(
+            key,
+            VehicleHistoryEvent(
+                timestamp = modification.recordedAt,
+                type = EventType.MODIFICATION,
+                title = "${component?.name ?: modification.componentId} — ${modification.kind.label.lowercase()}",
+                detail = buildString {
+                    append(modification.kind.detail)
+                    if (modification.note.isNotBlank()) append("\n\n${modification.note}")
+                    component?.expectedInstead?.takeIf { it.isNotBlank() }?.let {
+                        append("\n\nWhat to expect now: $it")
+                    }
+                },
+            ),
+        )
+        refresh()
+    }
+
+    /** Puts a component back to standard, so its readings are judged normally again. */
+    fun clearModification(key: String, componentId: String) {
+        val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return
+        if (vehicle.modifications.none { it.componentId == componentId }) return
+        save(vehicle.copy(modifications = vehicle.modifications.filterNot { it.componentId == componentId }))
+
+        record(
+            key,
+            VehicleHistoryEvent(
+                timestamp = System.currentTimeMillis(),
+                type = EventType.MODIFICATION,
+                title = "${ModificationCatalogue[componentId]?.name ?: componentId} — back to standard",
+                detail = "Its readings and fault codes are judged against the factory " +
+                    "figures again.",
+            ),
+        )
+        refresh()
+    }
+
+    fun modificationsFor(key: String?): VehicleModifications {
+        val vehicle = _vehicles.value.firstOrNull { it.key == key } ?: return VehicleModifications()
+        return VehicleModifications(vehicle.modifications)
     }
 
     /**
@@ -356,6 +431,7 @@ class Garage(private val context: Context) {
                     appendLine("firstSeen=${vehicle.firstSeen}")
                     appendLine("lastSeen=${vehicle.lastSeen}")
                     appendLine("lastCodes=${escape(vehicle.lastCodes.joinToString(","))}")
+                    appendLine("modifications=${escape(encodeModifications(vehicle.modifications))}")
                 }
             )
         }.onFailure { Log.e(TAG, "Could not save vehicle", it) }
@@ -381,6 +457,7 @@ class Garage(private val context: Context) {
                 lastSeen = fields["lastSeen"]?.toLongOrNull() ?: 0L,
                 lastCodes = fields["lastCodes"].orEmpty()
                     .split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
+                modifications = decodeModifications(fields["modifications"].orEmpty()),
             )
         }.getOrNull()
     }
@@ -398,6 +475,40 @@ class Garage(private val context: Context) {
          * so a hundred metres of slack costs nothing. A rollback is measured in thousands.
          */
         internal const val ODOMETER_TOLERANCE_KM = 0.5
+
+        /**
+         * Modifications on one line of the vehicle file.
+         *
+         * Pipe between records and semicolon between fields, both of which are already
+         * escaped away by [escape] before the line is written, so an owner's free-text note
+         * can contain either without breaking the file. A record that does not parse is
+         * dropped rather than failing the load: a corrupt modification must not cost
+         * somebody their whole vehicle history.
+         */
+        internal fun encodeModifications(mods: List<Modification>): String =
+            mods.joinToString("|") { mod ->
+                listOf(
+                    mod.componentId,
+                    mod.kind.name,
+                    mod.recordedAt.toString(),
+                    mod.note.replace(";", ",").replace("|", "/"),
+                ).joinToString(";")
+            }
+
+        internal fun decodeModifications(encoded: String): List<Modification> =
+            encoded.split('|').mapNotNull { record ->
+                if (record.isBlank()) return@mapNotNull null
+                val parts = record.split(';')
+                if (parts.size < 3) return@mapNotNull null
+                val kind = runCatching { ModKind.valueOf(parts[1]) }.getOrNull()
+                    ?: return@mapNotNull null
+                Modification(
+                    componentId = parts[0],
+                    kind = kind,
+                    note = parts.getOrNull(3).orEmpty(),
+                    recordedAt = parts[2].toLongOrNull() ?: 0L,
+                )
+            }
 
         /** Tab-separated, with the separators escaped so a detail can contain anything. */
         internal fun encode(event: VehicleHistoryEvent): String = listOf(
