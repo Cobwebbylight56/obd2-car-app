@@ -316,40 +316,61 @@ class AbnormalReadingMonitorTest {
 
     private fun monitor() = com.rhys.obd2.data.AbnormalReadingMonitor()
 
+    /**
+     * Feeds a reading until the monitor is willing to commit.
+     *
+     * A single bad reading deliberately no longer raises anything. A value that dips for a
+     * moment on a gear change used to put a permanent entry in the car's history, which is
+     * how a monitor teaches you to ignore it; it now has to persist. These tests say so
+     * explicitly rather than assuming either behaviour.
+     */
+    private fun com.rhys.obd2.data.AbnormalReadingMonitor.confirm(
+        pid: Int,
+        value: Double,
+    ) = (1..com.rhys.obd2.data.AbnormalReadingMonitor.CONFIRM_READS)
+        .mapNotNull { observe(pid, value) }
+        .lastOrNull()
+
     @Test
     fun `flags a genuine overheat`() {
         val m = monitor()
         assertNull(m.observe(0x05, 90.0))
-        val hit = m.observe(0x05, 118.0)!!
+        val hit = m.confirm(0x05, 118.0)!!
         assertEquals(com.rhys.obd2.data.AbnormalSeverity.SERIOUS, hit.severity)
         assertTrue(hit.message.contains("cool", ignoreCase = true))
     }
 
     @Test
+    fun `a single bad reading is not enough`() {
+        val m = monitor()
+        assertNull("one blip must never reach the car's history", m.observe(0x05, 118.0))
+    }
+
+    @Test
     fun `reports each rule once per session`() {
         val m = monitor()
-        assertNotNull(m.observe(0x05, 120.0))
+        assertNotNull(m.confirm(0x05, 120.0))
         // A fault that persists for ten minutes is one event, not four hundred.
         assertNull(m.observe(0x05, 121.0))
         assertNull(m.observe(0x05, 125.0))
         m.reset()
-        assertNotNull(m.observe(0x05, 120.0))
+        assertNotNull(m.confirm(0x05, 120.0))
     }
 
     @Test
     fun `does not call a resting battery a charging fault`() {
         val m = monitor()
         // Ignition on, engine off: 12.4 V is a healthy battery, not a dead alternator.
-        assertNull(m.observe(0x42, 12.4))
+        assertNull(m.confirm(0x42, 12.4))
         assertNull(m.observe(0x0C, 0.0))
-        assertNull(m.observe(0x42, 12.3))
+        assertNull(m.confirm(0x42, 12.3))
     }
 
     @Test
     fun `flags low charging voltage once the engine is running`() {
         val m = monitor()
         m.observe(0x0C, 800.0)
-        val hit = m.observe(0x42, 12.1)!!
+        val hit = m.confirm(0x42, 12.1)!!
         assertEquals(com.rhys.obd2.data.AbnormalSeverity.SERIOUS, hit.severity)
         assertTrue(hit.message.contains("alternator", ignoreCase = true))
     }
@@ -360,12 +381,12 @@ class AbnormalReadingMonitorTest {
         m.observe(0x0C, 900.0)
         m.observe(0x05, 20.0)
         // Trims swing wildly on a cold engine in open loop; flagging them is noise.
-        assertNull(m.observe(0x07, 30.0))
+        assertNull(m.confirm(0x07, 30.0))
 
         val warm = monitor()
         warm.observe(0x0C, 900.0)
         warm.observe(0x05, 88.0)
-        assertNotNull(warm.observe(0x07, 30.0))
+        assertNotNull(warm.confirm(0x07, 30.0))
     }
 
     @Test
@@ -373,9 +394,9 @@ class AbnormalReadingMonitorTest {
         val m = monitor()
         m.observe(0x0C, 850.0)
         m.observe(0x05, 90.0)
-        assertNull(m.observe(0x42, 14.1))
-        assertNull(m.observe(0x07, 3.0))
-        assertNull(m.observe(0x0F, 25.0))
-        assertNull(m.observe(0x5C, 95.0))
+        assertNull(m.confirm(0x42, 14.1))
+        assertNull(m.confirm(0x07, 3.0))
+        assertNull(m.confirm(0x0F, 25.0))
+        assertNull(m.confirm(0x5C, 95.0))
     }
 }

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rhys.obd2.data.ConnectionState
+import com.rhys.obd2.data.LinkState
 import com.rhys.obd2.data.UnitSystem
 import com.rhys.obd2.data.Units
 import com.rhys.obd2.obd.Pid
